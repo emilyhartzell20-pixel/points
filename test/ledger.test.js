@@ -216,3 +216,42 @@ test('a connector failure is recorded and shown; last successful sync is kept', 
   assert.equal(st.last_success_at, okAt);
   assert.match(st.recent_failures[0].error, /503/);
 });
+
+test('manual add: work that is not in ClickUp, email, or even on the menu', async () => {
+  const { db, hp } = await seeded();
+  const before = ledger.balance(db, hp);
+  const base = { clientId: hp, title: 'One-off board deck review', points: 6, state: 'used', reason: 'Dana asked on our 11/18 call', actor: 'emily@leadg2.example' };
+  // Custom work must explain how the amount was agreed.
+  assert.throws(() => importer.manualEntry(db, { ...base, idempotencyKey: 'k1' }), /not on the service menu/);
+  const { item } = importer.manualEntry(db, { ...base, idempotencyKey: 'k1', exceptionReason: 'Agreed 6 pts with Dana', evidenceUrl: 'https://teams.example/msg/1',
+    clientSummary: 'Reviewed and tightened your board presentation', summaryApproved: true });
+  assert.equal(item.menu_item_code, null);
+  assert.equal(item.menu_item_name, 'Custom (not on menu)');
+  assert.match(item.internal_notes, /teams\.example/);
+  const after = ledger.balance(db, hp);
+  assert.equal(after.used, before.used + 6);
+  assert.equal(after.available, before.available - 6);
+  assert.ok(clientDashboard(db, hp).completed.some((r) => r.description === 'Reviewed and tightened your board presentation'));
+  assert.doesNotMatch(JSON.stringify(clientDashboard(db, hp)), /teams\.example|Agreed 6 pts/, 'evidence and pricing notes stay internal');
+  const log = db.prepare(`SELECT * FROM audit_log WHERE entity='work_item' AND entity_id=?`).get(item.id);
+  assert.equal(log.actor, 'emily@leadg2.example');
+  // Approved-but-not-done work reserves points; planned work moves nothing.
+  importer.manualEntry(db, { ...base, title: 'Reserve test', menuItemCode: 'TRAIN', points: 4, state: 'committed', idempotencyKey: 'k2' });
+  importer.manualEntry(db, { ...base, title: 'Plan test', menuItemCode: 'TRAIN', points: 4, state: 'forecast', idempotencyKey: 'k3' });
+  const end = ledger.balance(db, hp);
+  assert.equal(end.committed, after.committed + 4);
+  assert.equal(end.forecast, after.forecast + 4);
+});
+
+test('manual add: bonus or purchased points increase the allocation, with a required reference', async () => {
+  const { db, hp } = await seeded();
+  const before = ledger.balance(db, hp);
+  assert.throws(() => ledger.addAllocation(db, { clientId: hp, kind: 'purchase', points: 30, sourceRef: '', actor: 't' }), /Reference/);
+  assert.throws(() => ledger.addAllocation(db, { clientId: hp, kind: 'purchase', points: -5, sourceRef: 'PO-1', actor: 't' }), /positive/);
+  ledger.addAllocation(db, { clientId: hp, kind: 'purchase', points: 30, sourceRef: 'Order form PO-1204', actor: 'emily@leadg2.example' });
+  const after = ledger.balance(db, hp);
+  assert.equal(after.allocated, before.allocated + 30);
+  assert.equal(after.available, before.available + 30);
+  assert.equal(clientDashboard(db, hp).allocation_breakdown.purchase, 55);
+  assert.equal(db.prepare(`SELECT actor FROM audit_log WHERE action='allocation.add.purchase'`).get().actor, 'emily@leadg2.example');
+});

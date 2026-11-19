@@ -16,6 +16,17 @@ Demo logins:
 
 With `npm run demo`, first grant access under **Client preview & access**. Every demo run resets `data/leadg2.db`.
 
+## Adding points by hand
+
+Use the **+ Add points** button in the staff console (top right, and on the Ledger tab). It has two modes:
+
+- **Log work:** for work that never showed up in ClickUp or email, such as a call, a Teams message or a hallway request. Pick a menu item or "Custom – not on the menu", set the status (completed uses points, approved reserves them, planned is forecast only), and say how you know it was approved. Custom work and amounts outside the menu need a "why this amount" note. You can attach an optional evidence link, which stays internal. A live preview shows how the balance will change before you save. Each entry is logged with your name.
+- **Add to allocation:** for bonus points or additional purchased points. This requires a reference to the signed agreement or order form.
+
+## Branding
+
+The colors come from the LeadG2 "Service Points 2026" one-pager in Canva: navy `#1b263b`, orange `#e17226`, slate `#50606d` and light panels `#f4f4f4`. The font is Montserrat, loaded from Google Fonts. To use the official logo instead of the text wordmark, drop `logo-white.png` (for the navy header) and `logo.png` (for the white sign-in card) into `public/brand/`.
+
 ## The worked example
 
 | Step | Allocated | Used | Committed | Available |

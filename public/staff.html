@@ -3,27 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LeadG2 Points – Internal</title>
+  <title>LeadG2 Service Points – Internal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <nav class="topbar">
-    <div class="brand">LeadG2 <span>Service Points · Internal</span></div>
+    <a class="brand" href="/"><img class="brand-logo" src="/static/brand/logo-white.png" alt="LeadG2" hidden><span class="brand-word">LEADG2</span><span class="brand-tag">Service Points · Internal</span></a>
     <label class="client-pick">Client <select id="client"></select></label>
     <button id="logout" class="ghost">Sign out</button>
   </nav>
   <div class="wrap">
     <section id="balance" class="stats compact" aria-label="Balance"></section>
-    <div class="tabs" role="tablist">
-      <button data-tab="review" class="active">Review queue <span id="qcount" class="pill"></span></button>
-      <button data-tab="ledger">Ledger</button>
-      <button data-tab="entry">Manual entry &amp; import</button>
-      <button data-tab="sources">Sources &amp; sync</button>
-      <button data-tab="preview">Client preview &amp; access</button>
-      <button data-tab="audit">Audit log</button>
+    <div class="toolbar">
+      <div class="tabs" role="tablist">
+        <button data-tab="review" class="active">Review queue <span id="qcount" class="pill"></span></button>
+        <button data-tab="ledger">Ledger</button>
+        <button data-tab="entry">Import</button>
+        <button data-tab="sources">Sources &amp; sync</button>
+        <button data-tab="preview">Client preview &amp; access</button>
+        <button data-tab="audit">Audit log</button>
+      </div>
+      <button id="add-points" class="primary">+ Add points</button>
     </div>
     <main id="panel"></main>
   </div>
+  <footer class="site-footer"><span class="brand-word">LEADG2</span><a class="footer-link" href="https://www.leadg2.com" target="_blank" rel="noopener noreferrer">www.leadg2.com</a></footer>
   <script src="/static/common.js"></script>
   <script src="/static/staff.js"></script>
 </body>

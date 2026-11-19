@@ -36,7 +36,7 @@ function send(res, status, body, headers = {}) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     ...headers,
   });
   res.end(isJson ? JSON.stringify(body) : body);
@@ -49,7 +49,7 @@ async function readJson(req) {
   try { return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch { throw new AppError(400, 'Invalid JSON'); }
 }
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 function serveStatic(res, file) {
   const p = path.join(PUBLIC, file);
   if (!p.startsWith(PUBLIC) || !fs.existsSync(p)) return send(res, 404, 'Not found');
@@ -148,6 +148,10 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
   route('POST', '/api/staff/clients/:id/work-items', 'staff', async ({ req, res, p, user }) => {
     const id = clientExists(int(p.id)); const b = await readJson(req);
     send(res, 200, importer.manualEntry(db, { ...b, clientId: id, points: Number(b.points), actor: user.email }));
+  });
+  route('POST', '/api/staff/clients/:id/allocations', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    send(res, 200, ledger.addAllocation(db, { clientId: id, kind: b.kind, points: Number(b.points), sourceRef: b.sourceRef, note: b.note, actor: user.email }));
   });
   route('GET', '/api/staff/match-queue', 'staff', ({ res }) => send(res, 200, ingest.matchQueue(db)));
   route('POST', '/api/staff/match-queue/:rid', 'staff', async ({ req, res, p, user }) => {

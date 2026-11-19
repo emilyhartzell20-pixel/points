@@ -96,16 +96,21 @@ function manualEntry(db, p) {
   const dup = db.prepare('SELECT * FROM work_items WHERE client_id = ? AND external_ref = ?').get(p.clientId, ref);
   if (dup) return { item: dup, duplicate: true };
   if (!p.reason) throw new AppError(400, 'Give a reason / evidence note for the manual entry');
-  const menu = requireItem(db, p.clientId, p.menuItemCode);
+  if (!p.title || !String(p.title).trim()) throw new AppError(400, 'Describe the work');
   const points = Number(p.points);
-  if ((points < menu.points_min || points > menu.points_max) && !p.exceptionReason) {
+  // Work that is not on the client's menu ("custom") is allowed, but must say why.
+  const menu = p.menuItemCode ? requireItem(db, p.clientId, p.menuItemCode) : null;
+  if (!menu && !p.exceptionReason) throw new AppError(400, 'This work is not on the service menu: explain how the point amount was agreed');
+  if (menu && (points < menu.points_min || points > menu.points_max) && !p.exceptionReason) {
     throw new AppError(400, `Amount ${points} is outside the menu (${menu.points_min}–${menu.points_max}); give an exception reason`);
   }
+  const notes = [p.internalNotes, p.evidenceUrl && `Evidence: ${p.evidenceUrl}`].filter(Boolean).join('\n') || null;
   const item = ledger.createWorkItem(db, {
     clientId: p.clientId, state: p.state, points, title: p.title, clientSummary: p.clientSummary, summaryApproved: !!p.summaryApproved,
-    externalRef: ref, menuVersionId: menu.menu_version_id, menuItemCode: menu.code, menuItemName: menu.name, workDate: p.workDate,
-    origin: 'manual', internalNotes: p.internalNotes, actor: p.actor,
-    reason: [p.reason, p.exceptionReason && `Exception: ${p.exceptionReason}`].filter(Boolean).join(' · '), overrideReason: p.overrideReason,
+    externalRef: ref, menuVersionId: menu ? menu.menu_version_id : undefined, menuItemCode: menu ? menu.code : null,
+    menuItemName: menu ? menu.name : 'Custom (not on menu)', workDate: p.workDate,
+    origin: 'manual', internalNotes: notes, actor: p.actor,
+    reason: [p.reason, p.exceptionReason && `${menu ? 'Exception' : 'Custom pricing'}: ${p.exceptionReason}`].filter(Boolean).join(' · '), overrideReason: p.overrideReason,
   });
   return { item, duplicate: false };
 }

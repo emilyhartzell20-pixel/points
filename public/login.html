@@ -3,20 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LeadG2 Points – Sign in</title>
+  <title>LeadG2 Service Points – Sign in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="login-body">
-  <main class="login-card">
-    <div class="brand">LeadG2 <span>Service Points</span></div>
-    <form id="login">
-      <label>Email <input name="email" type="email" autocomplete="username" required></label>
-      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-      <button type="submit" class="primary">Sign in</button>
-      <p id="err" class="error" role="alert"></p>
-    </form>
-    <p class="muted small">Demo: consultant@leadg2.example / demo-consultant · dana@harborpoint.example / demo-client</p>
+  <main class="login-main">
+    <div class="login-card">
+      <a class="brand" href="/"><img class="brand-logo" src="/static/brand/logo.png" alt="LeadG2" hidden><span class="brand-word">LEADG2</span><span class="brand-tag">Service Points</span></a>
+      <p class="muted small">Sign in to see your service point balance.</p>
+      <form id="login">
+        <label>Email <input name="email" type="email" autocomplete="username" required></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" class="primary">Sign in</button>
+        <p id="err" class="error" role="alert"></p>
+      </form>
+      <p class="muted small">Demo: consultant@leadg2.example / demo-consultant · dana@harborpoint.example / demo-client</p>
+    </div>
   </main>
+  <footer class="site-footer"><span class="brand-word">LEADG2</span><a class="footer-link" href="https://www.leadg2.com" target="_blank" rel="noopener noreferrer">www.leadg2.com</a></footer>
   <script src="/static/common.js"></script>
   <script src="/static/login.js"></script>
 </body>

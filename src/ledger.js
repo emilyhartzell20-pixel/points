@@ -188,5 +188,23 @@ function logSupportHours(db, { clientId, hours, description, workDate, actor, su
   audit(db, { clientId, actor, action: 'support_hours.log', detail: { hours, description } });
 }
 
-module.exports = { activeContract, balance, createWorkItem, transition, correct, setSummary, listItems, listEvents,
+/**
+ * Add points to the contract allocation (bonus or additional purchase). Each addition needs a
+ * reference to the agreement / order form, because the signed paperwork is the source of truth.
+ */
+function addAllocation(db, { clientId, kind, points, sourceRef, actor, note }) {
+  if (!['bonus', 'purchase', 'base'].includes(kind)) throw new AppError(400, 'Choose bonus, purchase or base');
+  if (!Number.isInteger(points) || points <= 0) throw new AppError(400, 'Points must be a positive whole number');
+  if (!sourceRef || !String(sourceRef).trim()) throw new AppError(400, 'Reference the signed agreement, order form or approval for these points');
+  return tx(db, () => {
+    const contract = activeContract(db, clientId);
+    const r = db.prepare('INSERT INTO allocations (contract_id, kind, points, source_ref, verified_by, created_at) VALUES (?,?,?,?,?,?)')
+      .run(contract.id, kind, points, String(sourceRef).trim(), actor, nowIso());
+    audit(db, { clientId, actor, action: `allocation.add.${kind}`, entity: 'allocation', entityId: Number(r.lastInsertRowid), reason: note || null,
+      detail: { points, source_ref: sourceRef } });
+    return db.prepare('SELECT * FROM allocations WHERE id = ?').get(Number(r.lastInsertRowid));
+  });
+}
+
+module.exports = { addAllocation, activeContract, balance, createWorkItem, transition, correct, setSummary, listItems, listEvents,
   supportHours, logSupportHours, getItem };

@@ -20,6 +20,92 @@ const ACTION_TEXT = { forecast: 'Planned (forecast)', approve: 'Approved → res
 const DEFAULT_STATE = { forecast: 'forecast', approve: 'committed', complete: 'used', cancel: 'canceled', change: '' };
 
 document.getElementById('logout').addEventListener('click', logout);
+document.getElementById('add-points').addEventListener('click', () => openAddPoints());
+
+// ------------------------------------------------------------------ "+ Add points" dialog
+// Two cases: (1) log work that never showed up in ClickUp or email, (2) add points to the allocation.
+function openAddPoints(mode = 'work') {
+  const o = state.overview; const b = o.balance;
+  const today = new Date().toISOString().slice(0, 10);
+  const dlg = h('dialog', { class: 'add-points', 'aria-label': 'Add points' });
+  const body = h('div', { class: 'dlg-body' });
+  const close = () => { dlg.close(); dlg.remove(); };
+  const seg = h('div', { class: 'seg', role: 'tablist' },
+    h('button', { type: 'button', class: mode === 'work' ? 'on' : '', onclick: () => { close(); openAddPoints('work'); } }, 'Log work'),
+    h('button', { type: 'button', class: mode === 'alloc' ? 'on' : '', onclick: () => { close(); openAddPoints('alloc'); } }, 'Add to allocation'));
+  const impact = h('p', { class: 'impact' });
+  let form;
+
+  if (mode === 'work') {
+    const menuSel = h('select', { name: 'menuItemCode' }, h('option', { value: '' }, 'Custom – not on the menu'),
+      o.menu.items.map((i) => h('option', { value: i.code }, `${i.name} (${i.points_min === i.points_max ? i.points_min : `${i.points_min}–${i.points_max}`} pts)`)));
+    const pts = h('input', { name: 'points', type: 'number', min: '0', step: '1', required: true });
+    const st = h('select', { name: 'state' },
+      h('option', { value: 'used' }, 'Completed – use points now'),
+      h('option', { value: 'committed' }, 'Approved, not done yet – reserve points'),
+      h('option', { value: 'forecast' }, 'Planned only – forecast (no points move)'));
+    const exc = h('label', {}, 'Why this amount? (required for custom work or amounts outside the menu)', h('input', { name: 'exceptionReason', placeholder: 'e.g. Agreed 6 pts with Dana for a one-off training deck' }));
+    const update = () => {
+      const m = o.menu.items.find((i) => i.code === menuSel.value);
+      if (m && pts.dataset.auto !== 'off') pts.value = m.points_min === m.points_max ? m.points_min : '';
+      const n = Number(pts.value) || 0;
+      const outside = m ? (n < m.points_min || n > m.points_max) : true;
+      exc.hidden = !outside;
+      const s2 = st.value;
+      impact.textContent = s2 === 'forecast' ? `No change to the balance. Shown as forecast (${b.forecast + n} pts planned).`
+        : `Available goes from ${b.available} to ${b.available - n}. ${s2 === 'used' ? `Used becomes ${b.used + n}.` : `Committed becomes ${b.committed + n}.`}`;
+    };
+    pts.addEventListener('input', () => { pts.dataset.auto = 'off'; update(); });
+    menuSel.addEventListener('change', () => { pts.dataset.auto = 'on'; update(); });
+    st.addEventListener('change', update);
+    form = h('form', { class: 'grid-form' },
+      h('div', { class: 'hint' }, 'For work that never appeared in ClickUp or email: a call, a Teams message, a hallway request. It goes straight onto the ledger and is logged with your name.'),
+      h('label', {}, 'What was the work?', h('input', { name: 'title', required: true, placeholder: 'e.g. Rebuilt the partner referral form' })),
+      h('div', { class: 'row' }, h('label', {}, 'Service menu item', menuSel), h('label', {}, 'Points', pts)),
+      exc,
+      h('div', { class: 'row' }, h('label', {}, 'Status', st), h('label', {}, 'Date', h('input', { name: 'workDate', type: 'date', value: today }))),
+      h('label', {}, 'How do we know? (who asked / approved, and where)', h('input', { name: 'reason', required: true, placeholder: 'e.g. Dana approved on our 11/18 call' })),
+      h('label', {}, 'Link to evidence (optional)', h('input', { name: 'evidenceUrl', type: 'url', placeholder: 'https://…' })),
+      h('label', {}, 'What the client will see (plain language, optional)', h('input', { name: 'clientSummary', placeholder: 'e.g. Rebuilt your partner referral form' })),
+      h('label', { class: 'check' }, h('input', { name: 'summaryApproved', type: 'checkbox' }), 'Show this summary on the client dashboard'),
+      h('input', { type: 'hidden', name: 'idempotencyKey', value: crypto.randomUUID() }),
+      impact,
+      h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add to ledger'), h('button', { type: 'button', onclick: close }, 'Cancel')));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(form); const data = Object.fromEntries(f.entries()); data.summaryApproved = f.get('summaryApproved') === 'on';
+      act(async () => {
+        const r = await api(`/api/staff/clients/${state.clientId}/work-items`, data);
+        close(); toast(r.duplicate ? 'Already added (duplicate submit ignored)' : 'Work added to the ledger');
+      });
+    });
+    setTimeout(update);
+  } else {
+    const pts = h('input', { name: 'points', type: 'number', min: '1', step: '1', required: true });
+    const update = () => { const n = Number(pts.value) || 0; impact.textContent = `Allocated goes from ${b.allocated} to ${b.allocated + n}; available from ${b.available} to ${b.available + n}.`; };
+    pts.addEventListener('input', update);
+    form = h('form', { class: 'grid-form' },
+      h('div', { class: 'hint' }, 'For bonus points or additional points the client bought. The signed agreement or order form is the source of truth, so reference it.'),
+      h('div', { class: 'row' },
+        h('label', {}, 'Type', h('select', { name: 'kind' }, h('option', { value: 'purchase' }, 'Additional purchase'), h('option', { value: 'bonus' }, 'Bonus points'))),
+        h('label', {}, 'Points', pts)),
+      h('label', {}, 'Agreement / order form reference', h('input', { name: 'sourceRef', required: true, placeholder: 'e.g. Order form PO-1204, signed 2026-11-18' })),
+      h('label', {}, 'Note (optional)', h('input', { name: 'note' })),
+      impact,
+      h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add to allocation'), h('button', { type: 'button', onclick: close }, 'Cancel')));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(form).entries());
+      act(async () => { await api(`/api/staff/clients/${state.clientId}/allocations`, data); close(); toast('Allocation updated'); });
+    });
+    update();
+  }
+  body.append(seg, form);
+  dlg.append(h('div', { class: 'dlg-head' }, h('h2', {}, `Add points · ${o.client.name}`), h('button', { type: 'button', onclick: close, 'aria-label': 'Close' }, 'Close')), body);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  document.body.append(dlg);
+  dlg.showModal();
+}
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
   state.tab = b.dataset.tab; render();
@@ -160,7 +246,7 @@ async function renderLedger() {
     act(() => api(`/api/staff/work-items/${w.id}/summary`, { clientSummary: text, approved: ok }), 'Summary saved');
   };
   return h('div', {},
-    h('section', { class: 'card' }, h('h2', {}, 'Work items'),
+    h('section', { class: 'card' }, h('div', { class: 'toolbar' }, h('h2', {}, 'Work items'), h('button', { class: 'primary', onclick: () => openAddPoints() }, '+ Add points')),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['Date', 'Work', 'State', 'Points', 'Menu', 'Origin', 'Client summary', 'Evidence', ''].map((t) => h('th', {}, t)))),
         h('tbody', {}, items.map((w) => h('tr', { class: `state-${w.state}` },
@@ -185,25 +271,6 @@ const signed = (n) => (n > 0 ? `+${n}` : n === 0 ? '·' : String(n));
 
 // ------------------------------------------------------------------ manual entry & import
 function renderEntry() {
-  const form = h('form', { class: 'card grid-form' },
-    h('h2', {}, 'Manual entry'),
-    h('p', { class: 'muted small' }, 'Use when a connector is unavailable or the work happened outside ClickUp/Outlook.'),
-    h('label', {}, 'Title (internal)', h('input', { name: 'title', required: true })),
-    h('label', {}, 'Menu item', menuSelect('')),
-    h('label', {}, 'Points', h('input', { name: 'points', type: 'number', min: '0', step: '1', required: true })),
-    h('label', {}, 'State', h('select', { name: 'state' }, h('option', { value: 'forecast' }, 'Forecast'), h('option', { value: 'committed' }, 'Committed'), h('option', { value: 'used' }, 'Used'))),
-    h('label', {}, 'Date', h('input', { name: 'workDate', type: 'date', value: new Date().toISOString().slice(0, 10) })),
-    h('label', {}, 'Evidence / reason', h('input', { name: 'reason', required: true, placeholder: 'e.g. Approved by Dana on call 11/18' })),
-    h('label', {}, 'Exception reason (if outside menu)', h('input', { name: 'exceptionReason' })),
-    h('label', {}, 'Client summary', h('input', { name: 'clientSummary' })),
-    h('label', { class: 'check' }, h('input', { name: 'summaryApproved', type: 'checkbox' }), 'Summary approved for client'),
-    h('input', { type: 'hidden', name: 'idempotencyKey', value: crypto.randomUUID() }),
-    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add entry')));
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const f = new FormData(form); const body = Object.fromEntries(f.entries()); body.summaryApproved = f.get('summaryApproved') === 'on';
-    act(async () => { const r = await api(`/api/staff/clients/${state.clientId}/work-items`, body); if (r.duplicate) toast('Already added (duplicate submit ignored)'); }, 'Entry added');
-  });
   const imp = h('form', { class: 'card' },
     h('h2', {}, 'Import from tracker (CSV)'),
     h('p', { class: 'muted small' }, 'Columns: tracker_id, date, title, client_summary, menu_code, points, status (used|committed|forecast), clickup_task_id, notes. Re-importing the same tracker_id is skipped, never duplicated.'),
@@ -219,7 +286,8 @@ function renderEntry() {
       toast(`Imported ${r.created}, skipped ${r.skipped}${r.conflicts.length ? `, ${r.conflicts.length} conflict(s): ${r.conflicts.map((c) => c.note).join(' | ')}` : ''}`, r.conflicts.length ? 'error' : 'ok');
     });
   });
-  return h('div', { class: 'two-col' }, form, imp);
+  return h('div', {}, imp,
+    h('p', { class: 'muted small' }, 'To add a single entry by hand, use the "+ Add points" button.'));
 }
 
 // ------------------------------------------------------------------ sources

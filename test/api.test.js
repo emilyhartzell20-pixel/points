@@ -46,10 +46,11 @@ test('one client cannot access another client\'s data', async (t) => {
   const item = db.prepare('SELECT id FROM work_items WHERE client_id = ? LIMIT 1').get(hp);
   assert.equal((await pat.post(`/api/staff/work-items/${item.id}/correct`, { points: 0, reason: 'x' })).status, 403);
   assert.equal((await pat.post(`/api/staff/clients/${hp}/portal`, { enabled: false })).status, 403);
+  assert.equal((await pat.post(`/api/staff/clients/${bb}/allocations`, { kind: 'bonus', points: 999, sourceRef: 'x' })).status, 403, 'clients cannot add points');
+  assert.equal((await pat.post(`/api/staff/clients/${bb}/work-items`, { title: 'x', points: 1, state: 'used', reason: 'x', exceptionReason: 'x' })).status, 403);
 
   // Unauthenticated requests are refused.
   assert.equal((await client(base).get('/api/client/dashboard')).status, 401);
-  void bb;
 });
 
 test('client view excludes email bodies, internal notes, suggestions and evidence links', async (t) => {

@@ -1,4 +1,9 @@
 'use strict';
+// Use the official LeadG2 logo if one has been dropped into public/brand/; otherwise keep the text wordmark.
+document.querySelectorAll('.brand-logo').forEach((img) => {
+  const show = () => { img.hidden = false; const w = img.parentElement.querySelector('.brand-word'); if (w) w.hidden = true; };
+  if (img.complete && img.naturalWidth) show(); else img.addEventListener('load', show);
+});
 // Shared helpers. All dynamic text goes through textContent (never innerHTML), so task and email
 // content can never inject markup or script.
 function h(tag, attrs, ...children) {
