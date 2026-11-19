@@ -1,0 +1,14 @@
+tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes
+HP-001,2026-04-15,Portal property audit,Audited your HubSpot contact and company properties,PROP-AUDIT,6,used,,
+HP-002,2026-04-28,Lead nurture email series,Built a five-email nurture series for new leads,EMAIL-SERIES,8,used,,
+HP-003,2026-05-12,Quote-request landing page,Built the quote-request landing page,LP-BUILD,10,used,,
+HP-004,2026-05-30,Deal routing workflow,Built automated deal routing by region,WF-COMPLEX,12,used,,
+HP-005,2026-06-18,Contact data cleanup (28k records),"Cleaned and de-duplicated about 28,000 contact records",DATA-CLEAN,11,used,,3 x 10k bands; agreed 11 with client
+HP-006,2026-07-09,Sales team HubSpot training,Ran a one-hour HubSpot training for the sales team,TRAIN,4,used,,
+HP-007,2026-07-22,Freight quote calculator integration,Connected the freight quote calculator to HubSpot,INTEG,15,used,,
+HP-008,2026-08-14,Monthly newsletter template,Designed the monthly newsletter email template,EMAIL-TPL,6,used,,
+HP-009,2026-09-03,Executive pipeline dashboard,Built the executive pipeline dashboard,DASH,8,used,,
+HP-010,2026-09-19,Carrier onboarding workflow,Built the carrier onboarding workflow,WF-SIMPLE,5,used,,
+HP-011,2026-09-10,Sales pipeline rebuild,Rebuilding your sales pipeline stages and properties,PIPE-REBUILD,10,committed,86b2pipe,
+HP-012,2026-09-15,Lead scoring model,Building a lead scoring model,LEAD-SCORE,8,committed,86b2lead,
+HP-013,2026-09-25,Webinar email series,Webinar promotion email series,EMAIL-SERIES,8,committed,86b2webi,

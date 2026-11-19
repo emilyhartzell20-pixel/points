@@ -1,0 +1,48 @@
+[
+  {
+    "slug": "harbor-point",
+    "name": "Harbor Point Logistics",
+    "aliases": ["Harbor Point", "HPL"],
+    "pilot": true,
+    "contract": {
+      "term_start": "2026-04-01", "term_end": "2027-03-31", "menu": "2026.1",
+      "agreement_ref": "Harbor Point Services Agreement HP-2026 (signed 2026-03-18)",
+      "opening_balance_date": "2026-10-01", "opening_used": 85, "opening_committed": 26,
+      "opening_csv": "opening-tracker-harbor-point.csv"
+    },
+    "allocations": [
+      { "kind": "base", "points": 200, "source_ref": "Agreement HP-2026 §3.1", "verified_by": "finance@leadg2.example" },
+      { "kind": "bonus", "points": 25, "source_ref": "Agreement HP-2026 §3.2 (signing bonus)", "verified_by": "finance@leadg2.example" },
+      { "kind": "purchase", "points": 25, "source_ref": "Order form PO-1187 (2026-08-20)", "verified_by": "finance@leadg2.example" }
+    ],
+    "support_hours": { "hours_purchased": 10, "source_ref": "Agreement HP-2026 §5 (HubSpot support bank)" },
+    "mappings": [
+      { "source_type": "clickup_space", "value": "9001", "scope": "points", "label": "Harbor Point space" },
+      { "source_type": "clickup_list", "value": "9101", "scope": "points", "label": "HP – Points work" },
+      { "source_type": "clickup_list", "value": "9102", "scope": "consulting", "label": "HP – Monthly consulting" },
+      { "source_type": "clickup_list", "value": "9103", "scope": "project", "label": "HP – Website redesign project (fixed scope)" },
+      { "source_type": "clickup_list", "value": "9104", "scope": "support_hours", "label": "HP – HubSpot support hours" },
+      { "source_type": "email_domain", "value": "harborpoint.example", "scope": "points", "label": "Harbor Point staff" }
+    ],
+    "users": [ { "email": "dana@harborpoint.example", "name": "Dana Reyes", "password": "demo-client" } ]
+  },
+  {
+    "slug": "bluebird",
+    "name": "Bluebird Dental Group",
+    "aliases": ["Bluebird Dental"],
+    "pilot": false,
+    "portal_enabled": true,
+    "contract": {
+      "term_start": "2026-01-01", "term_end": "2026-12-31", "menu": "2025.2",
+      "agreement_ref": "Bluebird Services Agreement BD-2026",
+      "opening_balance_date": "2026-10-01", "opening_used": 20, "opening_committed": 6,
+      "opening_csv": "opening-tracker-bluebird.csv"
+    },
+    "allocations": [ { "kind": "base", "points": 100, "source_ref": "Agreement BD-2026 §2", "verified_by": "finance@leadg2.example" } ],
+    "mappings": [
+      { "source_type": "clickup_list", "value": "7101", "scope": "points", "label": "Bluebird – Points work" },
+      { "source_type": "email_domain", "value": "bluebirddental.example", "scope": "points", "label": "Bluebird staff" }
+    ],
+    "users": [ { "email": "pat@bluebirddental.example", "name": "Pat Okafor", "password": "demo-client" } ]
+  }
+]

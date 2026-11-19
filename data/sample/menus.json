@@ -1,0 +1,33 @@
+[
+  {
+    "code": "2026.1",
+    "name": "LeadG2 Service Point Menu 2026.1",
+    "effective_date": "2026-01-01",
+    "items": [
+      { "code": "LP-BUILD", "name": "Landing page build", "points_min": 10, "points_max": 10, "keywords": ["landing page"] },
+      { "code": "EMAIL-TPL", "name": "Email template build", "points_min": 6, "points_max": 6, "keywords": ["email template", "newsletter template"] },
+      { "code": "EMAIL-SERIES", "name": "Email nurture series (up to 5 emails)", "points_min": 8, "points_max": 8, "keywords": ["email series", "nurture series", "webinar email"] },
+      { "code": "WF-SIMPLE", "name": "Simple workflow (single branch)", "points_min": 5, "points_max": 5, "keywords": ["simple workflow"] },
+      { "code": "WF-COMPLEX", "name": "Complex workflow build", "points_min": 8, "points_max": 15, "keywords": ["workflow", "routing", "automation"], "notes": "Scale by branches and integrations; confirm with consultant." },
+      { "code": "DASH", "name": "Custom reporting dashboard", "points_min": 8, "points_max": 8, "keywords": ["dashboard"] },
+      { "code": "LEAD-SCORE", "name": "Lead scoring model", "points_min": 8, "points_max": 8, "keywords": ["lead scoring"] },
+      { "code": "PIPE-REBUILD", "name": "Sales pipeline rebuild", "points_min": 10, "points_max": 10, "keywords": ["pipeline rebuild"] },
+      { "code": "INTEG", "name": "Integration setup", "points_min": 12, "points_max": 20, "keywords": ["integration", "connector"] },
+      { "code": "DATA-CLEAN", "name": "Data cleanup / import (per 10k records)", "points_min": 4, "points_max": 12, "keywords": ["data cleanup", "dedupe", "data import"] },
+      { "code": "TRAIN", "name": "Team training session (1 hour)", "points_min": 4, "points_max": 4, "keywords": ["training"] },
+      { "code": "PROP-AUDIT", "name": "Property audit", "points_min": 6, "points_max": 6, "keywords": ["property audit"] }
+    ]
+  },
+  {
+    "code": "2025.2",
+    "name": "LeadG2 Service Point Menu 2025.2",
+    "effective_date": "2025-07-01",
+    "items": [
+      { "code": "LP-BUILD", "name": "Landing page build", "points_min": 8, "points_max": 8, "keywords": ["landing page"] },
+      { "code": "EMAIL-TPL", "name": "Email template build", "points_min": 6, "points_max": 6, "keywords": ["email template"] },
+      { "code": "WF-COMPLEX", "name": "Complex workflow build", "points_min": 8, "points_max": 12, "keywords": ["workflow"] },
+      { "code": "DASH", "name": "Custom reporting dashboard", "points_min": 6, "points_max": 6, "keywords": ["dashboard"] },
+      { "code": "INTEG", "name": "Integration setup", "points_min": 12, "points_max": 20, "keywords": ["integration"] }
+    ]
+  }
+]

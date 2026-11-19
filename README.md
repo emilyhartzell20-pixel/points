@@ -1,0 +1,79 @@
+# LeadG2 Service Points: pilot
+
+This app tracks each client's service points. It has a ledger, an internal review queue, and a client dashboard. Adapters read ClickUp and Outlook as evidence. The pilot runs on **sample data**: one pilot client (Harbor Point Logistics) and one second client (Bluebird Dental Group) that the isolation tests use.
+
+It needs nothing installed beyond Node.js 22.13 or later. It uses only built-in `node:http`, `node:sqlite` and `node:test`.
+
+```bash
+npm test                 # 23 tests
+npm run demo             # seed + sample sync, review queue left pending → http://localhost:3000
+npm run demo:reviewed    # same, plus the scripted consultant review → 250 / 103 / 23 / 124
+```
+
+Demo logins:
+- Staff: `consultant@leadg2.example` / `demo-consultant`
+- Client: `dana@harborpoint.example` / `demo-client`
+
+With `npm run demo`, first grant access under **Client preview & access**. Every demo run resets `data/leadg2.db`.
+
+## The worked example
+
+| Step | Allocated | Used | Committed | Available |
+|---|---|---|---|---|
+| Opening balance reconciled from tracker (as of 2026‑10‑01) | 250 (200 base + 25 bonus + 25 purchased) | 85 | 26 | 139 |
+| After sample ClickUp/Outlook sync (suggestions only) | 250 | 85 | 26 | 139 |
+| Lead scoring completed (8 committed → used) | 250 | 93 | 18 | 139 |
+| Carrier landing page completed (client approved + confirmed live) | 250 | 103 | 18 | 129 |
+| Webinar emails canceled by client (release 8) | 250 | 103 | 10 | 137 |
+| Exception routing workflow approved (menu range 8–15, reviewer confirms 13) | **250** | **103** | **23** | **124** |
+
+The scripted review also makes these decisions. None of them change the point balance:
+- The dashboard request is tracked as a forecast only.
+- The consulting task, the fixed-scope project task and the injection email are dismissed with reasons.
+- 1.5 h goes to the separate support-hours bank.
+- The uncertain personal-email match is assigned to Harbor Point and then dismissed.
+- The "chatbot idea" email stays open, because an email mention alone never charges points.
+
+## How the business rules map to code
+
+| Rule | Where |
+|---|---|
+| Allocation comes from the agreement or a verified opening balance. Opening import must reconcile against contract totals or nothing is imported | `contracts`, `allocations`; `importer.importTracker({opening:true})` |
+| Available = allocated − used − committed. Forecast is shown but never counted | `ledger.balance` |
+| Approved → committed (reserve). Completed + confirmed → the *same* points move committed → used. Cancel → release. Used work cannot be canceled, only corrected | `ledger.transition`; append-only `ledger_events` |
+| Corrections need a reason and log who and why | `ledger.correct` → `audit_log` |
+| Menu versions per contract. The approved amount, item and version are snapshotted on the work item | `menu_versions`, `menu_items`, `work_items.points/menu_*` |
+| Ranges, unclear costs, consulting/project scope, disagreeing sources and missing client approval are flagged. The reviewer confirms the amount | `ingest.evaluateGroup` flags; `review.approveSuggestion` validation |
+| Support-hours bank is kept in hours and never mixed into points | `support_hour_banks/entries`; `support_hours` suggestions |
+| Stable source IDs make repeat imports safe. Tasks, subtasks and email threads group into one deliverable | `source_records UNIQUE(source_type, external_id)`, `ingest.regroup`, `suggestions UNIQUE(client, group, action)` |
+| A sync never charges points. Only a consultant's approval writes to the ledger | `ingest.js` has no ledger writes |
+| Uncertain client matches go to a queue | `ingest.matchRecord` → `match_status='uncertain'` |
+| Manual entry and CSV import are idempotent (`tracker_id` or form idempotency key) | `importer.js` |
+| Last successful sync and sync failures are shown | `sync_runs`, **Sources & sync** tab |
+| The client view is built from an allow-list. Only approved summaries appear, and staff preview uses the same function | `clientView.clientDashboard` |
+| Client isolation happens on the server. Client routes take the client from the session only, and staff routes need the staff role | `server.js` |
+
+## Security notes
+
+- **Task and email text is evidence only.** It is regex-classified for signals (requested, approved, completed, canceled, changed) and shown escaped (`textContent`, strict CSP). It is never treated as instructions. Text that looks like instructions is flagged `embedded_instructions`.
+- **Connectors are read-only.** `adapters/http.js` refuses any method except GET. Tokens are read from server environment variables, sent only in headers, and never written to sync errors or the browser.
+- **Sessions:** HttpOnly, SameSite=Strict cookies. Tokens are stored hashed. Passwords use scrypt. POST requests must be JSON. Revoking a client's access ends their sessions.
+
+## Connecting real accounts (after the pilot sign-off)
+
+Set `CONNECTOR_MODE=live` and provide the credentials server-side:
+
+| Source | Env vars | Permissions |
+|---|---|---|
+| ClickUp | `CLICKUP_API_TOKEN` | A read-only member's personal token, or an OAuth app limited to the pilot space |
+| Outlook | `OUTLOOK_MAILBOX` plus `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (or `OUTLOOK_ACCESS_TOKEN`) | Graph `Mail.Read` application permission, scoped with an Exchange application access policy to the shared mailbox |
+
+Then replace the sample `source_mappings` with the pilot's real ClickUp space/list IDs and email domains, and import the reconciled tracker CSV with "This is the reconciled opening balance" checked. `INTERNAL_EMAIL_DOMAINS` (default `leadg2.com`) controls which participants are ignored when matching clients.
+
+## Not done yet / next steps
+
+- User management UI (users are seeded). Add SSO (Entra ID) for staff before production.
+- No scheduled sync yet. Syncs run from the UI or API. Add a cron to call `syncSource` per client.
+- Signal detection is keyword-based. It is deterministic and auditable, but it will miss some phrasing, which is why everything goes through review.
+- Remove the demo credentials hint from `public/login.html`, and set `NODE_ENV=production` for Secure cookies behind HTTPS.
+- `node:sqlite` is fine for the pilot. Move to Postgres for multi-user production.

@@ -1,0 +1,384 @@
+[
+  {
+    "id": "86b2lead",
+    "name": "Lead scoring model",
+    "text_content": "Build lead scoring: fit + engagement. Thresholds agreed with Mark.",
+    "description": "Build lead scoring: fit + engagement. Thresholds agreed with Mark.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1789480800000",
+    "date_updated": "1792513800000",
+    "date_closed": "1792513800000",
+    "url": "https://app.clickup.com/t/86b2lead",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Service Menu Item",
+        "type": "short_text",
+        "value": "LEAD-SCORE"
+      }
+    ]
+  },
+  {
+    "id": "86b2webi",
+    "name": "Webinar email series",
+    "text_content": "Three promo emails + reminder for the October webinar.",
+    "description": "Three promo emails + reminder for the October webinar.",
+    "status": {
+      "status": "in progress",
+      "type": "custom"
+    },
+    "date_created": "1790330400000",
+    "date_updated": "1791450900000",
+    "date_closed": null,
+    "url": "https://app.clickup.com/t/86b2webi",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Service Menu Item",
+        "type": "short_text",
+        "value": "EMAIL-SERIES"
+      }
+    ]
+  },
+  {
+    "id": "86b2pipe",
+    "name": "Sales pipeline rebuild",
+    "text_content": "New stages, required properties, and stage-based tasks.",
+    "description": "New stages, required properties, and stage-based tasks.",
+    "status": {
+      "status": "in progress",
+      "type": "custom"
+    },
+    "date_created": "1789034400000",
+    "date_updated": "1794308400000",
+    "date_closed": null,
+    "url": "https://app.clickup.com/t/86b2pipe",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Service Menu Item",
+        "type": "short_text",
+        "value": "PIPE-REBUILD"
+      }
+    ]
+  },
+  {
+    "id": "86b3land",
+    "name": "Carrier partner landing page",
+    "text_content": "Landing page + form for the carrier partner program.",
+    "description": "Landing page + form for the carrier partner program.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1792155600000",
+    "date_updated": "1793900700000",
+    "date_closed": "1793900700000",
+    "url": "https://app.clickup.com/t/86b3land",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Service Menu Item",
+        "type": "short_text",
+        "value": "LP-BUILD"
+      }
+    ]
+  },
+  {
+    "id": "86b3lcpy",
+    "name": "Landing page copy review",
+    "text_content": "Internal copy review for the carrier partner page.",
+    "description": "Internal copy review for the carrier partner page.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1792501200000",
+    "date_updated": "1793188800000",
+    "date_closed": "1793188800000",
+    "url": "https://app.clickup.com/t/86b3lcpy",
+    "parent": "86b3land",
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": []
+  },
+  {
+    "id": "86b3wflw",
+    "name": "Shipment exception routing workflow",
+    "text_content": "Route shipment exceptions to the right ops queue by region and severity. 4 branches + Slack alert.",
+    "description": "Route shipment exceptions to the right ops queue by region and severity. 4 branches + Slack alert.",
+    "status": {
+      "status": "in progress",
+      "type": "custom"
+    },
+    "date_created": "1794063600000",
+    "date_updated": "1794478800000",
+    "date_closed": null,
+    "url": "https://app.clickup.com/t/86b3wflw",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Points",
+        "type": "number",
+        "value": 13
+      }
+    ]
+  },
+  {
+    "id": "86b3dash",
+    "name": "Q1 regional sales dashboard",
+    "text_content": "Client asked for pricing on a regional sales dashboard for next quarter.",
+    "description": "Client asked for pricing on a regional sales dashboard for next quarter.",
+    "status": {
+      "status": "to do",
+      "type": "custom"
+    },
+    "date_created": "1794646800000",
+    "date_updated": "1794647100000",
+    "date_closed": null,
+    "url": "https://app.clickup.com/t/86b3dash",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": []
+  },
+  {
+    "id": "86b3cons",
+    "name": "October strategy call prep",
+    "text_content": "Prep agenda and KPI review for the monthly strategy call.",
+    "description": "Prep agenda and KPI review for the monthly strategy call.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1793091600000",
+    "date_updated": "1793286000000",
+    "date_closed": "1793286000000",
+    "url": "https://app.clickup.com/t/86b3cons",
+    "parent": null,
+    "list": {
+      "id": "9102",
+      "name": "HP – Monthly consulting"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": []
+  },
+  {
+    "id": "86b3proj",
+    "name": "Website redesign – services page",
+    "text_content": "Services page build, part of the fixed-scope website redesign project (SOW phase 2).",
+    "description": "Services page build, part of the fixed-scope website redesign project (SOW phase 2).",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1791190800000",
+    "date_updated": "1793372400000",
+    "date_closed": "1793372400000",
+    "url": "https://app.clickup.com/t/86b3proj",
+    "parent": null,
+    "list": {
+      "id": "9103",
+      "name": "HP – Website redesign project (fixed scope)"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [
+      {
+        "name": "project"
+      }
+    ],
+    "custom_fields": []
+  },
+  {
+    "id": "86b3supp",
+    "name": "Fix form notification settings",
+    "text_content": "Form notifications were going to a former employee. Updated recipients on 6 forms.",
+    "description": "Form notifications were going to a former employee. Updated recipients on 6 forms.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1793696400000",
+    "date_updated": "1793705400000",
+    "date_closed": "1793705400000",
+    "url": "https://app.clickup.com/t/86b3supp",
+    "parent": null,
+    "list": {
+      "id": "9104",
+      "name": "HP – HubSpot support hours"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Hours",
+        "type": "number",
+        "value": 1.5
+      }
+    ]
+  },
+  {
+    "id": "86b1oldx",
+    "name": "Q3 campaign UTM cleanup",
+    "text_content": "Before the opening balance date; already in the tracker.",
+    "description": "Before the opening balance date; already in the tracker.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1787216400000",
+    "date_updated": "1789214400000",
+    "date_closed": "1789214400000",
+    "url": "https://app.clickup.com/t/86b1oldx",
+    "parent": null,
+    "list": {
+      "id": "9101",
+      "name": "HP – Points work"
+    },
+    "space": {
+      "id": "9001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": []
+  },
+  {
+    "id": "77a1blue",
+    "name": "Patient recall email template",
+    "text_content": "Recall reminder template.",
+    "description": "Recall reminder template.",
+    "status": {
+      "status": "complete",
+      "type": "closed"
+    },
+    "date_created": "1790586000000",
+    "date_updated": "1792670400000",
+    "date_closed": "1792670400000",
+    "url": "https://app.clickup.com/t/77a1blue",
+    "parent": null,
+    "list": {
+      "id": "7101",
+      "name": "Bluebird – Points work"
+    },
+    "space": {
+      "id": "7001"
+    },
+    "creator": {
+      "username": "LeadG2 Consultant",
+      "email": "consultant@leadg2.example"
+    },
+    "tags": [],
+    "custom_fields": [
+      {
+        "name": "Service Menu Item",
+        "type": "short_text",
+        "value": "EMAIL-TPL"
+      }
+    ]
+  }
+]

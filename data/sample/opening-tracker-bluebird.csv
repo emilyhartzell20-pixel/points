@@ -1,0 +1,4 @@
+tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes
+BD-001,2026-03-02,New patient landing pages,Built two new-patient landing pages,LP-BUILD,16,used,,2 pages
+BD-002,2026-05-20,Appointment reminder workflow,Built the appointment reminder workflow,,4,used,,legacy item
+BD-003,2026-09-28,Patient recall email template,Designing the patient recall email template,EMAIL-TPL,6,committed,77a1blue,
