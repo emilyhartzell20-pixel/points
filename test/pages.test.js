@@ -85,3 +85,19 @@ test('invite links use the app address the admin is on (works before the custom 
   const r2 = JSON.parse((await staff.post(`/api/staff/clients/${s.hp}/users`, { name: 'Other Person', email: 'other@harborpoint.example' })).text);
   assert.ok(r2.link.startsWith('https://points.leadg2.com/setup#t='), 'an unknown address never ends up in a link');
 });
+
+test('a setup link that does not work says why: replaced, used or unknown', async (t) => {
+  const s = await seeded({ sync: false });
+  const srv = await startServer(createApp({ db: s.db, adapters: {} }));
+  t.after(srv.close);
+  const staff = client(srv.base); await staff.login(DEMO_STAFF.email, DEMO_STAFF.password);
+  const tok = (link) => link.split('#t=')[1];
+  const first = JSON.parse((await staff.post('/api/staff/team', { name: 'Stevie', email: 'stevie@leadg2.com' })).text);
+  const second = JSON.parse((await staff.post(`/api/staff/team/${first.userId}/link`, {})).text);
+  const anon = client(srv.base);
+  const r1 = await anon.post('/api/invite/check', { token: tok(first.link) });
+  assert.equal(r1.status, 410); assert.equal(JSON.parse(r1.text).reason, 'replaced');
+  assert.equal((await anon.post('/api/invite/accept', { token: tok(second.link), password: 'a-long-password' })).status, 200);
+  assert.equal(JSON.parse((await anon.post('/api/invite/check', { token: tok(second.link) })).text).reason, 'used');
+  assert.equal(JSON.parse((await anon.post('/api/invite/check', { token: 'nope' })).text).reason, 'unknown');
+});

@@ -268,12 +268,12 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
   });
   route('POST', '/api/invite/check', null, async ({ req, res }) => {
     const { token } = await readJson(req); const inv = auth.inviteInfo(db, token);
-    if (!inv) throw new AppError(410, 'This link has expired or was already used. Ask your LeadG2 consultant for a new one.');
+    if (!inv) { const why = auth.inviteProblem(db, token); return send(res, 410, { error: why.error, reason: why.reason }); }
     send(res, 200, { name: inv.name, email: inv.email });
   });
   route('POST', '/api/invite/accept', null, async ({ req, res }) => {
     const r = auth.acceptInvite(db, await readJson(req));
-    if (!r.ok) throw new AppError(400, r.error);
+    if (!r.ok) return send(res, 400, { error: r.error, reason: r.reason });
     send(res, 200, r);
   });
 

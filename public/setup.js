@@ -7,11 +7,11 @@
   const post = async (path, body) => {
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong'), { reason: data.reason });
     return data;
   };
   try {
-    if (!token) throw new Error('This link is incomplete. Ask your LeadG2 consultant for a new one.');
+    if (!token) throw new Error('This link is incomplete: the part after "#t=" is missing. Open the full link you were sent, or ask your LeadG2 contact for a new one.');
     const who = await post('/api/invite/check', { token });
     const pw = h('input', { type: 'password', name: 'pw', autocomplete: 'new-password', minlength: '10', required: true });
     const pw2 = h('input', { type: 'password', name: 'pw2', autocomplete: 'new-password', required: true });
@@ -31,6 +31,7 @@
     });
     box.replaceChildren(form);
   } catch (ex) {
-    box.replaceChildren(h('p', { class: 'error' }, ex.message));
+    box.replaceChildren(h('p', { class: 'error' }, ex.message),
+      ex.reason === 'used' ? h('p', {}, h('a', { href: '/login' }, 'Go to sign in →')) : null);
   }
 })();

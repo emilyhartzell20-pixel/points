@@ -54,7 +54,8 @@ const INVITE_DAYS = 7;
 
 /** Create a one-time link token for a user to set their password. Older unused links stop working. */
 function createInvite(db, { userId, actor }) {
-  db.prepare('UPDATE invites SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(new Date().toISOString(), userId);
+  const now = new Date().toISOString();
+  db.prepare('UPDATE invites SET used_at = ?, replaced_at = ? WHERE user_id = ? AND used_at IS NULL').run(now, now, userId);
   const token = crypto.randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + INVITE_DAYS * 86400e3).toISOString();
   db.prepare('INSERT INTO invites (token_hash, user_id, created_by, expires_at) VALUES (?,?,?,?)').run(tokenHash(token), userId, actor, expires);
@@ -67,9 +68,18 @@ function inviteInfo(db, token) {
   return row;
 }
 
+/** Why a link doesn't work, in words the person can act on. */
+function inviteProblem(db, token) {
+  const row = db.prepare('SELECT i.*, u.password_set FROM invites i JOIN users u ON u.id = i.user_id WHERE i.token_hash = ?').get(tokenHash(String(token || '')));
+  if (!row) return { reason: 'unknown', error: 'We don\'t recognize this link. It may have been copied incompletely, or the person was removed. Ask your LeadG2 contact for a new one.' };
+  if (row.replaced_at) return { reason: 'replaced', error: 'A newer link was created for you, so this one no longer works. Use the most recent link you were sent, or ask your LeadG2 contact for a new one.' };
+  if (row.used_at) return { reason: 'used', error: 'This link was already used to set your password. Sign in with your email and that password.' };
+  return { reason: 'expired', error: 'This link expired (links last 7 days). Ask your LeadG2 contact for a new one.' };
+}
+
 function acceptInvite(db, { token, password }) {
   const inv = inviteInfo(db, token);
-  if (!inv) return { ok: false, error: 'This link has expired or was already used. Ask your LeadG2 consultant for a new one.' };
+  if (!inv) return { ok: false, ...inviteProblem(db, token) };
   if (String(password || '').length < 10) return { ok: false, error: 'Choose a password with at least 10 characters.' };
   db.prepare('UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ?').run(hashPassword(password), inv.user_id);
   db.prepare('UPDATE invites SET used_at = ? WHERE token_hash = ?').run(new Date().toISOString(), inv.token_hash);
@@ -77,4 +87,4 @@ function acceptInvite(db, { token, password }) {
   return { ok: true, email: inv.email };
 }
 
-module.exports = { createInvite, inviteInfo, acceptInvite, createUser, login, logout, userForToken, hashPassword, verifyPassword };
+module.exports = { createInvite, inviteInfo, inviteProblem, acceptInvite, createUser, login, logout, userForToken, hashPassword, verifyPassword };
