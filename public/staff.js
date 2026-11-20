@@ -336,6 +336,16 @@ function renderSources() {
       mode === 'not_connected' ? null : h('p', { class: 'small' }, key === 'tracker' ? 'Last import: ' : 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · syncs automatically every hour' : ''),
       s.last_run && mode !== 'not_connected' ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}`) : null,
       s.recent_failures.length && mode !== 'not_connected' ? h('div', { class: 'error small' }, h('strong', {}, 'Recent failures'), h('ul', {}, s.recent_failures.slice(0, 3).map((f) => h('li', {}, `${fmtDateTime(f.started_at)}: ${f.error}`)))) : null,
+      key === 'clickup' && mode === 'live' && mapped ? h('div', { class: 'hint' },
+        'Does this client have a points tracker list in ClickUp (Total Points + Service Point Status)? Load everything in it once:',
+        h('div', { class: 'actions' }, h('button', { class: 'secondary', onclick: (e) => {
+          if (!confirm('Read every task in this client\'s ClickUp tracker and add it to the ledger?\n\nCompleted = used, In Progress / Client Review = committed, everything else = planned. Tasks already on the ledger are skipped, so this is safe to run again.')) return;
+          e.target.disabled = true; e.target.textContent = 'Reading ClickUp…';
+          act(async () => {
+            const r = await api(`/api/staff/clients/${state.clientId}/clickup-import`, {});
+            toast(`Found ${r.found} tracker items: ${r.created} added, ${r.skipped} already there. Now ${r.balance.used} used, ${r.balance.committed} committed, ${r.balance.available} available.`);
+          });
+        } }, 'Import tracker history from ClickUp'))) : null,
       key !== 'tracker' && mode !== 'not_connected' ? h('button', { class: 'primary', disabled: !mapped, onclick: () => act(async () => {
         const r = await api(`/api/staff/clients/${state.clientId}/sync`, { source: key });
         if (r[key].status === 'failed') throw new Error(`Sync failed: ${r[key].error}`);

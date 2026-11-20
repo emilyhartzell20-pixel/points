@@ -297,7 +297,12 @@ function generateSuggestions(db, clientId) {
     let created = 0, refreshed = 0;
     for (const { group_key: gk } of groups) {
       const ev = evaluateGroup(db, clientId, gk);
-      if (!ev) continue;
+      if (!ev) {
+        // Nothing left to decide for this deliverable (e.g. it is already on the ledger in this state).
+        db.prepare(`UPDATE suggestions SET status='dismissed', resolved_by='system', resolved_at=?, resolution_note=?
+                    WHERE client_id=? AND group_key=? AND status='open'`).run(nowIso(), 'No longer needed: the ledger already reflects this', clientId, gk);
+        continue;
+      }
       const existing = db.prepare('SELECT * FROM suggestions WHERE client_id = ? AND group_key = ? AND action = ?').get(clientId, gk, ev.action);
       let sid;
       if (existing) {
@@ -335,14 +340,18 @@ function generateSuggestions(db, clientId) {
 }
 
 // ---------------------------------------------------------------- sync orchestration
-function lastSuccess(db, clientId, source) {
-  return db.prepare(`SELECT * FROM sync_runs WHERE client_id=? AND source=? AND status='success' ORDER BY id DESC LIMIT 1`).get(clientId, source);
+function lastSuccess(db, clientId, source, mode) {
+  // The "changed since" watermark only counts runs against the same kind of connection: a sample-data
+  // run (or a run before the key was added) must not make a real sync skip real history.
+  return mode
+    ? db.prepare(`SELECT * FROM sync_runs WHERE client_id=? AND source=? AND status='success' AND mode=? ORDER BY id DESC LIMIT 1`).get(clientId, source, mode)
+    : db.prepare(`SELECT * FROM sync_runs WHERE client_id=? AND source=? AND status='success' ORDER BY id DESC LIMIT 1`).get(clientId, source);
 }
 
-async function syncSource(db, { clientId, source, adapter, actor = 'system' }) {
+async function syncSource(db, { clientId, source, adapter, actor = 'system', full = false }) {
   const contract = activeContract(db, clientId);
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
-  const prev = lastSuccess(db, clientId, source);
+  const prev = full ? null : lastSuccess(db, clientId, source, adapter.mode);
   // Re-read a 1-day overlap: safe because imports are idempotent, and it covers clock skew.
   const overlap = prev ? new Date(Date.parse(prev.started_at) - 86400000).toISOString() : null;
   const opening = contract.opening_balance_date ? new Date(`${contract.opening_balance_date}T00:00:00Z`).toISOString() : null;
@@ -415,4 +424,35 @@ function resolveMatch(db, { recordId, clientId, actor, reason }) {
   });
 }
 
-module.exports = { syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };
+// ---------------------------------------------------------------- import a ClickUp points tracker
+const TRACKER_STATE = { completed: 'used', approved: 'committed', in_progress: 'committed' };
+
+/**
+ * Read every task in the client's ClickUp tracker list(s) and put each one with points on the ledger:
+ * Completed = used, In Progress / Client Review = committed, everything else = planned (forecast).
+ * Idempotent: tasks already imported (here or from the tracker CSV) are skipped.
+ */
+async function importTrackerFromClickUp(db, { clientId, adapter, actor }) {
+  const importer = require('./importer');
+  if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
+  const mappings = mappingsFor(db, clientId).filter((m) => m.source_type.startsWith('clickup') && m.scope === 'points');
+  if (!mappings.length) throw Object.assign(new Error('Add the client\'s ClickUp tracker list under "Where the work comes from" first'), { status: 409 });
+  const tasks = (await fetchClickUp(adapter, { mappings, aliases: [], since: null }))
+    .filter((t) => t.data.from_tracker && t.data.points != null);
+  if (!tasks.length) throw Object.assign(new Error('No tasks with "Total Points" were found in the mapped ClickUp lists'), { status: 409 });
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = tasks.map((t) => {
+    const sig = clickupSignal(t.status);
+    const state = TRACKER_STATE[sig] || 'forecast';
+    const date = (t.data.delivery_month || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
+    const notes = [t.data.department, t.data.point_value != null && t.data.how_many != null ? `${t.data.point_value} pts x ${t.data.how_many}` : '', t.data.tracker_notes].filter(Boolean).join('; ');
+    return [q(`CU-${t.external_id}`), date, q(t.title.trim()), q(t.title.trim()), '', Math.round(t.data.points), state, q(t.external_id), q(notes)].join(',');
+  });
+  const csv = ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes', ...rows].join('\n');
+  const result = importer.importTracker(db, { clientId, csv, actor, filename: 'ClickUp tracker' });
+  // Then a full sync, so each item links to its ClickUp task and later changes are picked up from here.
+  const sync = await syncSource(db, { clientId, source: 'clickup', adapter, actor, full: true });
+  return { ...result, found: tasks.length, sync };
+}
+
+module.exports = { importTrackerFromClickUp, syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };

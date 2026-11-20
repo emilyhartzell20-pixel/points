@@ -283,6 +283,11 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     admin.removeMapping(db, { clientId: clientExists(int(p.id)), mappingId: int(p.mid), actor: user.email }); send(res, 200, { ok: true });
   });
 
+  route('POST', '/api/staff/clients/:id/clickup-import', 'staff', async ({ res, p, user }) => {
+    const id = clientExists(int(p.id));
+    const r = await ingest.importTrackerFromClickUp(db, { clientId: id, adapter: adapters.clickup, actor: user.email });
+    send(res, 200, { ...r, balance: ledger.balance(db, id) });
+  });
   route('GET', '/api/staff/clickup/browse', 'staff', async ({ res }) => {
     const a = adapters.clickup;
     if (!a || typeof a.listHierarchy !== 'function') throw new AppError(409, a && a.message ? a.message : 'ClickUp is not connected');

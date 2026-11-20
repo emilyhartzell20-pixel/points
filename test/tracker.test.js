@@ -88,3 +88,36 @@ test('opening balance from the tracker (used, committed and planned rows); later
   const after = ledger.balance(db, clientId);
   assert.deepEqual([after.used, after.committed, after.available, after.forecast], [40, 0, 860, 0]);
 });
+
+test('"Import tracker history" loads the whole ClickUp tracker once; re-running adds nothing; no review noise', async () => {
+  const db = openDb(':memory:');
+  const menu = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 't' });
+  const c = admin.createClient(db, { name: 'Questco', termStart: '2026-04-01', termEnd: '2027-03-31', menuVersionId: menu.id, agreementRef: 'x', basePoints: 900, actor: 't' });
+  admin.addMapping(db, { clientId: c.id, sourceType: 'clickup_list', value: '900900', scope: 'points', actor: 't' });
+  const old = (t) => ({ ...t, date_updated: String(Date.parse('2026-05-01T00:00:00Z')) });
+  const tasks = [
+    old(task('m-may', 'May 2026', null)),
+    old(task('a1', 'May Blogs', 'm-may', { status: 'opt-c', total: 10, pv: 5, hm: 2 })),
+    old(task('a2', 'Lead Scoring', 'm-sep', { status: 'opt-i', total: 16, pv: 2, hm: 1 })),
+    old(task('a3', 'December Blogs', 'm-dec', { status: 'opt-p', total: 10, pv: 5, hm: 2 })),
+  ];
+  const adapter = { mode: 'live', fetchTasks: async ({ since }) => { assert.equal(since, null); return tasks; } };
+  // A "successful" sample-mode run earlier must not shrink the window of the first live sync.
+  db.prepare(`INSERT INTO sync_runs (client_id, source, mode, started_at, finished_at, status) VALUES (?, 'clickup', 'sample', ?, ?, 'success')`).run(c.id, new Date().toISOString(), new Date().toISOString());
+  assert.equal(ingest.syncStatus(db, c.id).clickup.last_success_at != null, true);
+  const r = await ingest.importTrackerFromClickUp(db, { clientId: c.id, adapter, actor: 't' });
+  assert.deepEqual([r.found, r.created, r.skipped], [3, 3, 0]);
+  const b = ledger.balance(db, c.id);
+  assert.deepEqual([b.used, b.committed, b.available, b.forecast], [10, 16, 874, 10]);
+  assert.equal(review.listSuggestions(db, c.id, 'open').length, 0, 'nothing to review: the ledger matches ClickUp');
+  const again = await ingest.importTrackerFromClickUp(db, { clientId: c.id, adapter, actor: 't' });
+  assert.deepEqual([again.created, again.skipped], [0, 3]);
+});
+
+test('the first live sync ignores earlier sample-data runs when choosing what to fetch', async () => {
+  const { db, clientId } = setup();
+  db.prepare(`INSERT INTO sync_runs (client_id, source, mode, started_at, finished_at, status) VALUES (?, 'clickup', 'sample', ?, ?, 'success')`).run(clientId, new Date().toISOString(), new Date().toISOString());
+  let asked;
+  await ingest.syncSource(db, { clientId, source: 'clickup', adapter: { mode: 'live', fetchTasks: async ({ since }) => { asked = since; return []; } } });
+  assert.equal(asked, '2026-11-20T00:00:00.000Z', 'falls back to the opening-balance date, not the sample run');
+});
