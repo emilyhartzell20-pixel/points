@@ -165,3 +165,29 @@ test('moving a task under a different month heading in ClickUp moves it in the a
   assert.equal(r.rescheduled, 1);
   assert.equal(month(), '2027-02');
 });
+
+test('an incremental sync that does not return the month heading still moves the task (heading fetched directly)', async () => {
+  const db = openDb(':memory:');
+  const menu = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 't' });
+  const c = admin.createClient(db, { name: 'Questco', termStart: '2026-04-01', termEnd: '2027-03-31', menuVersionId: menu.id, agreementRef: 'x', basePoints: 900,
+    openingDate: '2026-11-19', openingUsed: 0, openingCommitted: 0, actor: 't' });
+  admin.addMapping(db, { clientId: c.id, sourceType: 'clickup_list', value: '900900', scope: 'points', actor: 't' });
+  const old = (x) => ({ ...x, date_updated: String(Date.parse('2026-06-01T00:00:00Z')) }); // headings untouched since June
+  const aug = old(task('m-aug', 'August 2026', null)); const feb = old(task('m-feb', 'February 2027', null));
+  const ph = (parent, updated) => { const t = task('ph', 'New Website/CRC Promotion Placeholder', parent, { status: 'opt-p', total: 50, pv: 50, hm: 1 });
+    t.custom_fields.push({ name: '📆 Delivery Month', type: 'date', value: String(Date.parse('2026-08-01T00:00:00Z')) }); t.date_updated = String(updated); return t; };
+  // Imported via the tracker CSV (as Questco was), then ClickUp syncs only return changed tasks.
+  importer.importTracker(db, { clientId: c.id, csv: 'tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id\nCU-ph,2026-08-01,Placeholder,,,50,forecast,ph\n', actor: 't' });
+  let fetchedById = [];
+  const adapter = { mode: 'live',
+    fetchTasks: async () => [ph('m-feb', Date.now())], // only the moved task changed
+    fetchTaskById: async (id) => { fetchedById.push(id); return { 'm-feb': feb, 'm-aug': aug }[id]; } };
+  const r = await ingest.syncSource(db, { clientId: c.id, source: 'clickup', adapter });
+  assert.deepEqual(fetchedById, ['m-feb']);
+  assert.equal(r.rescheduled, 1);
+  assert.equal(db.prepare(`SELECT substr(work_date,1,7) m FROM work_items WHERE external_ref = 'tracker:CU-ph'`).get().m, '2027-02');
+  // Next sync: heading already known, no extra lookup.
+  fetchedById = [];
+  await ingest.syncSource(db, { clientId: c.id, source: 'clickup', adapter });
+  assert.deepEqual(fetchedById, []);
+});

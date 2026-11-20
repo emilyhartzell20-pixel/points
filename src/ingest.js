@@ -421,7 +421,8 @@ async function syncSource(db, { clientId, source, adapter, actor = 'system', ful
     const touched = new Set([clientId]);
     tx(db, () => {
       for (const rec of records) {
-        if (opening && rec.occurred_at < opening) continue; // before the reconciled opening balance
+        // Before the opening balance: skip, except month headings ("February 2027"), which schedule the work under them.
+        if (opening && rec.occurred_at < opening && !(rec.source_type === 'clickup_task' && headingMonth(rec.title))) continue;
         stats.seen++;
         const match = matchRecord(db, rec);
         if (match.status === 'ignored') continue; // unrelated mail is not stored
@@ -431,7 +432,20 @@ async function syncSource(db, { clientId, source, adapter, actor = 'system', ful
         if (res.outcome === 'updated') stats.updated++;
       }
     });
-    for (const cid of touched) { stats.rescheduled = (stats.rescheduled || 0) + tx(db, () => applyTrackerDetails(db, cid)); generateSuggestions(db, cid); }
+    // A tracker task may sit under a month heading this sync didn't return (headings rarely change, so an
+    // incremental sync skips them). Fetch any such heading directly so the task lands in the right month.
+    if (source === 'clickup' && typeof adapter.fetchTaskById === 'function') {
+      const { normalizeTask } = require('./adapters/clickup');
+      const missing = new Set(records.filter((r) => r.data.from_tracker && r.data.raw_parent).map((r) => r.data.raw_parent));
+      for (const id of missing) {
+        if (db.prepare(`SELECT 1 FROM source_records WHERE source_type = 'clickup_task' AND external_id = ?`).get(id)) continue;
+        const parent = normalizeTask(await adapter.fetchTaskById(id));
+        if (!headingMonth(parent.title)) continue;
+        const match = matchRecord(db, parent);
+        if (match.status === 'matched') tx(db, () => upsertRecord(db, parent, match));
+      }
+    }
+    for (const cid of touched) { stats.rescheduled = (stats.rescheduled || 0) + tx(db, () => { regroup(db, cid); return applyTrackerDetails(db, cid); }); generateSuggestions(db, cid); }
     db.prepare(`UPDATE sync_runs SET status='success', finished_at=?, records_seen=?, records_new=?, records_updated=? WHERE id=?`)
       .run(nowIso(), stats.seen, stats.new, stats.updated, runId);
     audit(db, { clientId, actor, action: `sync.${source}.success`, detail: stats });

@@ -98,6 +98,11 @@ class LiveClickUp {
     return ids;
   }
   /** Workspaces → spaces → lists, so staff can pick lists instead of pasting IDs. Read-only. */
+  /** One task by id (used to look up a month heading the sync hasn't seen). Read-only. */
+  async fetchTaskById(id) {
+    return this.get(`/task/${encodeURIComponent(id)}`);
+  }
+
   async listHierarchy() {
     const out = [];
     const teams = await this.get('/team');
