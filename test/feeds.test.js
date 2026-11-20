@@ -57,12 +57,13 @@ test('waiting on you: only items ready for the client\'s review, without interna
 
 test('the ClickUp scan finds each client\'s calendar and collaboration lists and links them on import', async () => {
   const { db } = setup();
-  const scan = { ...adapter, listHierarchy: async () => [{ workspace: 'W', space: { id: 's', name: 'MrSteam' }, lists: [
+  const scan = { ...adapter, listHierarchy: async () => [{ workspace: 'W', space: { id: '55', name: 'MrSteam' }, lists: [
     { id: '900', name: 'MrSteam Point Tracker 2026 (740 Points)' }, { id: '700', name: '[MRSTEAM] Blog Calendar' },
     { id: '701', name: '[MRSTEAM] Collaboration' }, { id: '702', name: '[TEMPLATE] Collaboration' }] }] };
   const [row] = await ingest.findTrackers(db, scan);
-  assert.deepEqual([row.calendar.id, row.collaboration.id], ['700', '701']);
-  const [r] = await ingest.importTrackers(db, { adapter: scan, actor: 't', items: [{ listId: '900', listName: row.list_name, name: 'MrSteam', allocation: 740, calendarListId: '700', collabListId: '701' }] });
+  assert.deepEqual([row.calendar.id, row.collaboration.id], ['700', 'space:55'], 'approvals watch the whole space');
+  lists['55'] = lists['701'];
+  const [r] = await ingest.importTrackers(db, { adapter: scan, actor: 't', items: [{ listId: '900', listName: row.list_name, name: 'MrSteam', allocation: 740, calendarListId: '700', collabListId: row.collaboration.id }] });
   assert.deepEqual(r.linked_feeds, ['calendar', 'collaboration']);
   const v = clientDashboard(db, r.clientId);
   assert.equal(v.content.waiting.length, 1);
@@ -106,8 +107,8 @@ test('approve: sets the task to its list\'s approved status, comments, and drops
   assert.match(sent[0].comment, /Approved by Dana Q \(client\)/);
   assert.equal(clientDashboard(db, clientId).content.waiting.length, 0);
   assert.ok(db.prepare(`SELECT 1 FROM audit_log WHERE action = 'review.approve' AND actor = ?`).get(dana.email));
-  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'approve' }), /already been answered/);
-  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c2', decision: 'approve' }), /already been answered/, 'not-ready items cannot be approved');
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'approve' }), /Not found/, 'answered items are gone');
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c2', decision: 'approve' }), /Not found/, 'not-ready items are never offered');
   assert.equal(sent.length, 1);
 });
 
@@ -161,4 +162,43 @@ test('a client can only answer their own items, and staff cannot answer for them
   const ok = await dana2.post('/api/client/reviews/c1', { decision: 'approve' });
   assert.equal(ok.status, 200);
   assert.equal(sent.length, 1);
+});
+
+test('approvals can watch a whole space: "client review" items and tasks assigned to the client\'s people', async () => {
+  const { db, clientId } = setup();
+  db.prepare("INSERT INTO users (email, name, role, client_id, password_hash) VALUES ('kim@questco.example', 'Kim', 'client', ?, 'x')").run(clientId);
+  const space = [
+    { id: 'r1', name: 'December social posts', status: { status: 'client review', type: 'custom' }, list: { id: '501' }, due_date: ms('2026-12-01') },
+    { id: 'a1', name: 'Send 2027 survey contacts', status: { status: 'in progress', type: 'custom' }, list: { id: '502' }, assignees: [{ email: 'KIM@questco.example' }] },
+    { id: 'x1', name: 'Internal draft', status: { status: 'internal review', type: 'custom' }, list: { id: '501' }, assignees: [{ email: 'jeremy@leadg2.com' }] },
+    { id: 'x2', name: 'Old approved thing', status: { status: 'approved', type: 'done' }, list: { id: '501' }, assignees: [{ email: 'kim@questco.example' }] },
+  ];
+  const sent = []; let asked = null;
+  const qStatuses = ['not ready', 'in progress', 'internal review', 'client review', 'revisions', 'approved', 'done']
+    .map((status) => ({ status, type: status === 'approved' ? 'done' : status === 'done' ? 'closed' : 'custom' }));
+  const a = { mode: 'live', fetchTasks: async ({ mappings, includeClosed }) => { assert.equal(mappings[0].source_type, 'clickup_space'); assert.equal(includeClosed, false); return space; },
+    listStatuses: async (listId) => { asked = listId; return qStatuses; }, respondToReview: async (taskId, ans) => { sent.push({ taskId, ...ans }); } };
+  feeds.addFeed(db, { clientId, kind: 'collaboration', listId: 'https://app.clickup.com/9017740562/v/s/90173598053', actor: 't' });
+  await feeds.refreshFeeds(db, a, { clientId });
+  const w = clientDashboard(db, clientId).content.waiting;
+  assert.deepEqual(w.map((i) => [i.title, i.action]), [['December social posts', 'review'], ['Send 2027 survey contacts', 'assigned']]);
+
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'r1', decision: 'done' }), /already been answered/, 'review items use approve/changes');
+  await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'r1', decision: 'changes', comment: 'Fewer emojis' });
+  assert.equal(asked, '501', 'statuses come from the task\'s own list');
+  assert.equal(sent[0].status, 'revisions');
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'a1', decision: 'approve' }), /already been answered/);
+  const r = await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'a1', decision: 'done' });
+  assert.equal(r.status, 'done');
+  assert.match(sent[1].comment, /Marked done by Dana Q/);
+  assert.equal(clientDashboard(db, clientId).content.waiting.length, 0);
+});
+
+test('ClickUp links: list, folder and space URLs', () => {
+  assert.deepEqual(feeds.parseTarget('https://app.clickup.com/9017740562/v/li/901710435611'), { scope: 'list', id: '901710435611' });
+  assert.deepEqual(feeds.parseTarget('https://app.clickup.com/9017740562/v/f/90175845823'), { scope: 'folder', id: '90175845823' });
+  assert.deepEqual(feeds.parseTarget('https://app.clickup.com/9017740562/v/s/90173598053'), { scope: 'space', id: '90173598053' });
+  assert.deepEqual(feeds.parseTarget('space:90173598053'), { scope: 'space', id: '90173598053' });
+  assert.deepEqual(feeds.parseTarget('901710435611'), { scope: 'list', id: '901710435611' });
+  assert.equal(feeds.parseTarget('https://app.clickup.com/9017740562/v/f/90175845823/8cqzk8j-62977').scope, 'folder');
 });

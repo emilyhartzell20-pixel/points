@@ -137,16 +137,24 @@ class LiveClickUp {
     return out;
   }
 
-  async fetchTasks({ mappings, since }) {
+  async listIdsForFolder(folderId) {
+    const r = await this.get(`/folder/${encodeURIComponent(folderId)}/list?archived=false`);
+    return (r.lists || []).map((l) => String(l.id));
+  }
+
+  async fetchTasks({ mappings, since, includeClosed = true }) {
     const listIds = new Set(mappings.filter((m) => m.source_type === 'clickup_list').map((m) => m.value));
     for (const m of mappings.filter((x) => x.source_type === 'clickup_space')) {
       for (const id of await this.listIdsForSpace(m.value)) listIds.add(id);
+    }
+    for (const m of mappings.filter((x) => x.source_type === 'clickup_folder')) {
+      for (const id of await this.listIdsForFolder(m.value)) listIds.add(id);
     }
     const sinceMs = since ? Date.parse(since) : 0;
     const out = [];
     for (const listId of listIds) {
       for (let page = 0; page < 100; page++) {
-        const q = new URLSearchParams({ include_closed: 'true', subtasks: 'true', page: String(page) });
+        const q = new URLSearchParams({ include_closed: String(includeClosed), subtasks: 'true', page: String(page) });
         if (sinceMs) q.set('date_updated_gt', String(sinceMs));
         const res = await this.get(`/list/${encodeURIComponent(listId)}/task?${q}`);
         out.push(...(res.tasks || []));

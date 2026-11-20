@@ -414,14 +414,16 @@ function renderFeedsCard(o) {
   const KIND = { calendar: 'Editorial calendar', collaboration: 'Waiting on you (client approvals)' };
   const live = o.connector_mode.clickup === 'live';
   const kind = h('select', {}, h('option', { value: 'calendar' }, KIND.calendar), h('option', { value: 'collaboration' }, KIND.collaboration));
-  const list = h('input', { placeholder: 'Paste the ClickUp list URL or ID' });
+  const list = h('input', { placeholder: 'Paste a ClickUp list, folder or space URL' });
   const picker = h('div', { class: 'actions' });
   if (live) picker.append(h('button', { type: 'button', class: 'secondary', onclick: async (e) => {
     e.target.disabled = true; e.target.textContent = 'Loading ClickUp…';
     try {
       const tree = await api('/api/staff/clickup/browse');
       const sel = h('select', { 'aria-label': 'ClickUp list' }, h('option', { value: '' }, '— choose a list —'),
-        tree.map((t) => h('optgroup', { label: `${t.workspace} · ${t.space.name}` }, t.lists.map((l) => h('option', { value: l.id }, `${l.folder ? `${l.folder} › ` : ''}${l.name}`)))));
+        tree.map((t) => h('optgroup', { label: `${t.workspace} · ${t.space.name}` },
+          h('option', { value: `space:${t.space.id}` }, `★ Whole ${t.space.name} space (best for approvals)`),
+          t.lists.map((l) => h('option', { value: l.id }, `${l.folder ? `${l.folder} › ` : ''}${l.name}`)))));
       sel.addEventListener('change', () => { list.value = sel.value; });
       picker.replaceChildren(h('label', {}, 'Pick from ClickUp', sel));
     } catch (ex) { toast(ex.message, 'error'); e.target.disabled = false; e.target.textContent = 'Browse ClickUp'; }
@@ -429,9 +431,9 @@ function renderFeedsCard(o) {
   return h('section', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', {}, 'Shown on the client dashboard'),
       live && o.feeds.length ? h('button', { onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/feeds/refresh`, {}), 'Refreshed from ClickUp') }, 'Refresh now') : null),
-    h('p', { class: 'muted small' }, 'Client-facing ClickUp lists (not points): an editorial calendar, and the collaboration list where items marked "ready for review" appear as "Waiting on you". Only titles, dates and stages are shown, never descriptions or comments. Refreshed every 30 minutes.'),
+    h('p', { class: 'muted small' }, 'Editorial calendar: the client\'s blog/content calendar list. Waiting on you: pick the client\'s whole space. Anything in a review status ("client review", "ready for review") or assigned to someone with a login for this client shows up, and they can approve, request changes or mark it done right here; the answer is written back to ClickUp. Only titles and dates are shown, never descriptions or comments. Refreshed every 30 minutes.'),
     o.feeds.length ? h('table', {}, h('tbody', {}, o.feeds.map((f) => h('tr', {},
-      h('td', {}, h('strong', {}, KIND[f.kind])), h('td', { class: 'small' }, `List ${f.list_id}${f.label ? ` · ${f.label}` : ''}`),
+      h('td', {}, h('strong', {}, KIND[f.kind])), h('td', { class: 'small' }, `${{ space: 'Whole space', folder: 'Folder', list: 'List' }[f.scope || 'list']} ${f.list_id}${f.label ? ` · ${f.label}` : ''}`),
       h('td', { class: 'small' }, f.last_error ? h('span', { class: 'error' }, f.last_error) : `${f.items} items · updated ${fmtDateTime(f.refreshed_at)}`),
       h('td', { class: 'row-actions' }, h('button', { class: 'danger', onclick: () => {
         if (!confirm(`Stop showing this ${KIND[f.kind].toLowerCase()} to the client?`)) return;
@@ -439,7 +441,7 @@ function renderFeedsCard(o) {
       } }, 'Remove'))))))
       : h('p', { class: 'muted small' }, 'Nothing linked yet.'),
     h('h3', {}, 'Add a list'), picker,
-    h('div', { class: 'row' }, h('label', {}, 'Show as', kind), h('label', {}, 'ClickUp list', list),
+    h('div', { class: 'row' }, h('label', {}, 'Show as', kind), h('label', {}, 'ClickUp list or space', list),
       h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/feeds`, { kind: kind.value, listId: list.value }), 'Added') }, 'Add'))));
 }
 
@@ -511,12 +513,41 @@ function renderMappings(o) {
         : o.connector_mode.clickup === 'sample' ? 'This is the demo: it reads built-in sample data, not your real ClickUp.'
         : 'ClickUp is not connected yet. Follow the three steps in the ClickUp box above.'),
       h('ol', { class: 'small' },
-        h('li', {}, 'Every hour (or when you click "Sync ClickUp now"), the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads; it can never change a task.'),
+        h('li', {}, 'Every hour (or when you click "Sync ClickUp now"), the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads tasks. The one exception is a client answering an item in "Waiting on you" (approve, request changes, mark done): that sets the task\'s status and adds a comment.'),
         h('li', {}, 'Points-tracker lists (like "2026 Service Point Tracking") are read directly: "Service Point Status" gives the stage (Planned = forecast, In Progress = committed, Completed = used) and "Total Points" gives the amount. Month headings are ignored.'),
         h('li', {}, 'Other lists: it uses the task status, plus an optional "Service Menu Item" field or a menu:CODE tag. Subtasks without their own points roll up into their parent.'),
         h('li', {}, 'Emails that contain the task link (app.clickup.com/t/…) or its ID (CU-…) are grouped with that task, so one deliverable becomes one suggestion.'),
         h('li', {}, 'It turns what it found into suggestions in the Review queue. Nothing changes the balance until a consultant approves.'))));
 }
+// ------------------------------------------------------------------ quick links on the client dashboard
+function renderLinksCard(list) {
+  const label = h('input', { placeholder: 'e.g. Your SharePoint folder', maxlength: '60', 'aria-label': 'Name' });
+  const url = h('input', { type: 'url', placeholder: 'https://…', 'aria-label': 'Web address' });
+  const note = h('input', { placeholder: 'Optional: one line on what\'s there', maxlength: '140', 'aria-label': 'Description' });
+  const preset = (t, n) => h('button', { type: 'button', class: 'ghost small', onclick: () => { label.value = t; note.value = n; url.focus(); } }, t);
+  const form = h('form', { class: 'row' }, h('label', {}, 'Name', label), h('label', {}, 'Web address', url), h('label', {}, 'Description', note),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add link')));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    act(() => api(`/api/staff/clients/${state.clientId}/links`, { label: label.value, url: url.value, note: note.value }), 'Link added');
+  });
+  return h('section', { class: 'card' },
+    h('h2', {}, 'Quick links on the client\'s dashboard'),
+    h('p', { class: 'muted small' }, 'Cards at the top of their dashboard: their SharePoint folder, ClickUp board, brand assets, anything. They open in a new tab, and the client still needs their own access to whatever the link points to (for ClickUp, a guest invite to that board).'),
+    list.length ? h('table', {}, h('tbody', {}, list.map((l, i) => h('tr', {},
+      h('td', {}, h('strong', {}, l.label), l.note ? h('div', { class: 'muted small' }, l.note) : null),
+      h('td', { class: 'small' }, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.url.length > 60 ? `${l.url.slice(0, 57)}…` : l.url)),
+      h('td', { class: 'row-actions' },
+        i > 0 ? h('button', { class: 'ghost', title: 'Move up', 'aria-label': `Move ${l.label} up`, onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/links/${l.id}/up`, {}), 'Moved') }, '↑') : null,
+        h('button', { class: 'danger', onclick: () => { if (confirm(`Remove "${l.label}" from the client's dashboard?`)) act(() => api(`/api/staff/clients/${state.clientId}/links/${l.id}/remove`, {}), 'Removed'); } }, 'Remove'))))))
+      : h('p', { class: 'muted small' }, 'No links yet.'),
+    h('div', { class: 'presets' }, h('span', { class: 'muted small' }, 'Quick start: '),
+      preset('Your SharePoint folder', 'Shared files, reports and approved assets'),
+      preset('Your project board', 'See everything we\'re working on in ClickUp'),
+      preset('Book time with your consultant', 'Schedule a call')),
+    form);
+}
+
 // ------------------------------------------------------------------ preview & access
 async function renderPreview() {
   const [v, users] = await Promise.all([api(`/api/staff/clients/${state.clientId}/preview`), api(`/api/staff/clients/${state.clientId}/users`)]);
@@ -584,6 +615,7 @@ async function renderPreview() {
       h('button', { onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/show-planned`, { enabled: !c.show_planned }), c.show_planned ? 'Planned work hidden' : 'Planned work shown') },
         c.show_planned ? 'Hide planned work' : 'Show planned work')),
     logins,
+    renderLinksCard(state.overview.links || []),
     h('h2', { class: 'preview-title' }, 'What the client sees'),
     h('div', { class: 'preview-frame' }, renderClientView(v, { preview: true, clientId: state.clientId })));
 }

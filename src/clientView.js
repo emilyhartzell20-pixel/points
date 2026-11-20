@@ -1,5 +1,6 @@
 'use strict';
 const { pageInfo } = require('./pages');
+const { clientLinks } = require('./links');
 // Only whether there's a page and where it lives; never who uploaded it.
 function editorialForClient(db, clientId) {
   const p = pageInfo(db, clientId);
@@ -38,6 +39,7 @@ function clientDashboard(db, clientId) {
     },
     content: clientFeeds(db, clientId),
     editorial_page: editorialForClient(db, clientId),
+    links: clientLinks(db, clientId),
     by_month: byMonth(db, clientId, { forClient: true, includePlanned: !!client.show_planned }),
     planned: client.show_planned ? { points: b.forecast, available_after: b.available_after_planned } : null,
     support_hours: hours ? { purchased: hours.hours_purchased, used: hours.hours_used, remaining: hours.hours_remaining } : null,

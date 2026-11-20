@@ -339,3 +339,20 @@ button.type-chip { cursor: pointer; }
 
 .editorial-frame { width: 100%; height: 80vh; min-height: 560px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; display: block; margin-top: 8px; }
 @media (max-width: 640px) { .editorial-frame { height: 70vh; min-height: 420px; } }
+.tag-assigned { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--lg-navy); background: #e8edf5; border-radius: 999px; padding: 2px 8px; vertical-align: middle; }
+@media (prefers-color-scheme: dark) { .tag-assigned { color: var(--text); background: rgba(255,255,255,.1); } }
+
+/* Quick links at the top of the client dashboard */
+.quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.quick-link { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); text-decoration: none; color: var(--text); transition: box-shadow .15s, border-color .15s; min-width: 0; }
+.quick-link:hover { border-color: var(--accent); box-shadow: 0 6px 16px -8px rgba(13, 27, 42, .35); }
+.ql-icon { flex: none; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; font: 800 13px var(--font-ui); color: #fff; background: var(--lg-navy); }
+.k-sharepoint .ql-icon { background: #036c70; }
+.k-clickup .ql-icon { background: #7b68ee; }
+.k-hubspot .ql-icon { background: #ff7a59; }
+.ql-text { display: grid; min-width: 0; }
+.ql-label { font-weight: 700; font-family: var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ql-note { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ql-arrow { margin-left: auto; color: var(--accent); font-weight: 700; }
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 4px; }
+.presets button { padding: 4px 10px; font-size: 13px; }

@@ -13,6 +13,7 @@ const importer = require('./importer');
 const admin = require('./admin');
 const { HubSpotSync } = require('./adapters/hubspot');
 const editorialPages = require('./pages');
+const links = require('./links');
 const hubspotSync = require('./hubspotSync');
 const feeds = require('./feeds');
 const { clientDashboard } = require('./clientView');
@@ -159,6 +160,7 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
       connector_mode: Object.fromEntries(Object.entries(adapters).map(([k, a]) => [k, a.mode])),
       hubspot: { configured: hubspot.configured },
       editorial_page: editorialPages.pageInfo(db, id),
+      links: links.listLinks(db, id),
       feeds: feeds.listFeeds(db, id).map((f) => ({ ...f, items: db.prepare('SELECT COUNT(*) n FROM feed_items WHERE feed_id = ?').get(f.id).n })),
     });
   });
@@ -341,6 +343,16 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
   });
   route('POST', '/api/staff/clients/:id/editorial/remove', 'staff', async ({ res, p, user }) => {
     editorialPages.removePage(db, { clientId: clientExists(int(p.id)), actor: user.email }); send(res, 200, { ok: true });
+  });
+  route('POST', '/api/staff/clients/:id/links', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    send(res, 200, links.addLink(db, { clientId: id, label: b.label, url: b.url, note: b.note, actor: user.email }));
+  });
+  route('POST', '/api/staff/clients/:id/links/:lid/remove', 'staff', async ({ res, p, user }) => {
+    links.removeLink(db, { clientId: clientExists(int(p.id)), linkId: int(p.lid), actor: user.email }); send(res, 200, { ok: true });
+  });
+  route('POST', '/api/staff/clients/:id/links/:lid/up', 'staff', async ({ res, p }) => {
+    links.moveLinkUp(db, { clientId: clientExists(int(p.id)), linkId: int(p.lid) }); send(res, 200, { ok: true });
   });
   route('GET', '/api/staff/clickup/trackers', 'staff', async ({ res }) => send(res, 200, await ingest.findTrackers(db, adapters.clickup)));
   route('POST', '/api/staff/clickup/trackers/import', 'staff', async ({ req, res, user }) => {

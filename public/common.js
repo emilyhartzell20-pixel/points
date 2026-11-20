@@ -61,6 +61,7 @@ function renderClientView(v, opts = {}) {
       h('p', { class: 'eyebrow' }, v.client.name),
       h('h1', {}, 'Your service points, ', h('em', {}, 'at a glance.')),
       h('p', { class: 'lede' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Balance last updated ${fmtDateTime(v.last_updated)}`)),
+    renderLinks(v.links),
     renderWaiting(v.content, opts),
     h('section', { class: 'stats', 'aria-label': 'Point balance' },
       stat('Total allocated', v.balance.allocated, '', allocNote),
@@ -223,7 +224,7 @@ function renderWaiting(c, { preview = false, onAnswered } = {}) {
       try {
         await api(`/api/client/reviews/${encodeURIComponent(w.id)}`, { decision, comment });
         li.replaceChildren(h('div', { class: 'work-desc' }, w.title),
-          h('p', { class: 'answered' }, decision === 'approve' ? '✓ Approved. Thank you!' : '✓ Sent. We\'ll make your changes and send it back for review.'));
+          h('p', { class: 'answered' }, decision === 'approve' ? '✓ Approved. Thank you!' : decision === 'done' ? '✓ Marked done. Thank you!' : '✓ Sent. We\'ll make your changes and send it back for review.'));
         li.classList.add('done');
         if (onAnswered) setTimeout(onAnswered, 2500);
       } catch (e) { msg.textContent = e.message; msg.hidden = false; btns.forEach((b) => { b.disabled = false; }); }
@@ -237,6 +238,15 @@ function renderWaiting(c, { preview = false, onAnswered } = {}) {
     const cancel = h('button', { type: 'button', class: 'ghost' }, 'Cancel');
     box.append(ta, h('div', { class: 'row-actions' }, sendChanges, cancel));
     approve.onclick = () => { if (confirm(`Approve "${w.title}"?`)) send('approve', '', [approve, changes]); };
+    if (w.action === 'assigned') {
+      const done = h('button', { type: 'button', class: 'primary', disabled: preview || null }, 'Mark done');
+      done.onclick = () => { if (confirm(`Mark "${w.title}" as done?`)) send('done', '', [done]); };
+      li.append(h('div', { class: 'waiting-row' },
+        h('div', {}, h('div', { class: 'work-desc' }, w.title, ' ', h('span', { class: 'tag-assigned' }, 'Assigned to you')),
+          h('div', { class: 'work-meta' }, w.due ? `Due ${fmtDate(w.due)}` : 'No due date', open ? ' · ' : '', open)),
+        h('div', { class: 'row-actions' }, done)), msg);
+      return li;
+    }
     changes.onclick = () => { box.hidden = false; changes.hidden = true; approve.hidden = true; ta.focus(); };
     cancel.onclick = () => { box.hidden = true; changes.hidden = false; approve.hidden = false; };
     sendChanges.onclick = () => {
@@ -251,10 +261,21 @@ function renderWaiting(c, { preview = false, onAnswered } = {}) {
     return li;
   };
   return h('section', { class: `card waiting${n ? ' has-items' : ''}` },
-    h('div', { class: 'toolbar' }, h('h2', {}, 'Waiting ', h('em', {}, 'on you')), h('span', { class: 'muted small' }, n ? `${n} item${n === 1 ? '' : 's'} ready for your review` : 'Nothing needs you right now')),
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Waiting ', h('em', {}, 'on you')), h('span', { class: 'muted small' }, n ? `${n} item${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} you` : 'Nothing needs you right now')),
     preview && n ? h('p', { class: 'muted small' }, 'Preview: the buttons work only for the client.') : null,
     n ? h('ul', { class: 'waiting-list' }, c.waiting.map(item))
       : h('p', { class: 'muted small' }, 'When we send something for your review or approval, it will appear here.'));
+}
+const LINK_ICON = { sharepoint: 'SP', clickup: 'CU', hubspot: 'HS', google: 'G', teams: 'T', canva: 'C', link: '↗' };
+const LINK_KIND = { sharepoint: 'SharePoint', clickup: 'ClickUp', hubspot: 'HubSpot', google: 'Google', teams: 'Teams', canva: 'Canva', link: 'Link' };
+function renderLinks(list) {
+  if (!list || !list.length) return null;
+  return h('nav', { class: 'quick-links', 'aria-label': 'Quick links' }, list.map((l) =>
+    h('a', { class: `quick-link k-${l.kind}`, href: l.url, target: '_blank', rel: 'noopener noreferrer' },
+      h('span', { class: 'ql-icon', 'aria-hidden': 'true' }, LINK_ICON[l.kind] || '↗'),
+      h('span', { class: 'ql-text' }, h('span', { class: 'ql-label' }, l.label),
+        h('span', { class: 'ql-note' }, l.note || `Opens in ${LINK_KIND[l.kind] || 'a new tab'}`)),
+      h('span', { class: 'ql-arrow', 'aria-hidden': 'true' }, '↗'))));
 }
 function renderEditorialPage(pg, { preview = false, clientId } = {}) {
   const src = pg.kind === 'url' ? pg.url : preview ? `/api/staff/clients/${clientId}/editorial` : '/api/client/editorial';

@@ -553,7 +553,8 @@ async function findTrackers(db, adapter) {
   for (const sp of tree) {
     const pickList = (re) => sp.lists.find((x) => re.test(x.name) && !TEMPLATE_NAME.test(x.name) && !/template/i.test(x.name));
     const cal = pickList(/(blog|editorial|content)\s+calendar/i);
-    const collab = pickList(/\bcollaboration\b/i);
+    // Approvals watch the whole client space: items in a review status, or assigned to the client's people.
+    const collab = { id: `space:${sp.space.id}`, name: `Everything in ${sp.space.name} waiting on the client`, taken: sp.space.id };
     for (const l of sp.lists) {
       if (!TRACKER_NAME.test(l.name) || TEMPLATE_NAME.test(l.name) || /template/i.test(sp.space.name)) continue;
       const existing = byList[l.id];
@@ -562,7 +563,7 @@ async function findTrackers(db, adapter) {
         allocation: parseAllocation(l.name), status: existing ? 'linked' : sameName ? 'client_exists' : 'new',
         client_id: existing ? existing.client_id : sameName ? sameName.id : null, linked_to: existing ? existing.name : null,
         calendar: cal ? { id: cal.id, name: cal.name.trim(), linked: feedTaken.has(cal.id) } : null,
-        collaboration: collab ? { id: collab.id, name: collab.name.trim(), linked: feedTaken.has(collab.id) } : null });
+        collaboration: { id: collab.id, name: collab.name, linked: feedTaken.has(collab.taken) } });
     }
   }
   return out.sort((a, z) => a.client_name.localeCompare(z.client_name));
@@ -626,7 +627,8 @@ async function importTrackers(db, { items, adapter, actor }) {
       const feedsMod = require('./feeds');
       const linkedFeeds = [];
       for (const [kind, lid] of [['calendar', it.calendarListId], ['collaboration', it.collabListId]]) {
-        if (!lid || db.prepare('SELECT 1 FROM client_feeds WHERE kind = ? AND list_id = ?').get(kind, String(lid))) continue;
+        const target = lid && feedsMod.parseTarget(String(lid));
+        if (!target || db.prepare('SELECT 1 FROM client_feeds WHERE kind = ? AND list_id = ?').get(kind, target.id)) continue;
         feedsMod.addFeed(db, { clientId, kind, listId: String(lid), actor }); linkedFeeds.push(kind);
       }
       if (linkedFeeds.length) await feedsMod.refreshFeeds(db, adapter, { clientId });

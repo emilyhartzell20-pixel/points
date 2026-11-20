@@ -41,3 +41,31 @@ test('staff upload an HTML calendar; only that client sees it, sandboxed', async
   await staff.post(`/api/staff/clients/${s.hp}/editorial/remove`, {});
   assert.equal(JSON.parse((await dana.get('/api/client/dashboard')).text).editorial_page, null);
 });
+
+test('quick links: staff add them, only that client sees them, without internal details', async (t) => {
+  const s = await seeded({ sync: false });
+  s.db.prepare('UPDATE clients SET portal_enabled = 1').run();
+  const srv = await startServer(createApp({ db: s.db, adapters: {} }));
+  t.after(srv.close);
+  const staff = client(srv.base); await staff.login(DEMO_STAFF.email, DEMO_STAFF.password);
+  const dana = client(srv.base); await dana.login('dana@harborpoint.example', 'demo-client');
+  const pat = client(srv.base); await pat.login('pat@bluebirddental.example', 'demo-client');
+
+  assert.equal((await dana.post(`/api/staff/clients/${s.hp}/links`, { label: 'x', url: 'https://example.com' })).status, 403);
+  assert.equal((await staff.post(`/api/staff/clients/${s.hp}/links`, { label: 'Files', url: 'http://example.com' })).status, 400);
+  assert.equal((await staff.post(`/api/staff/clients/${s.hp}/links`, { label: '', url: 'https://example.com' })).status, 400);
+  await staff.post(`/api/staff/clients/${s.hp}/links`, { label: 'Your SharePoint folder', url: 'https://leadg2.sharepoint.com/sites/Clients/Harbor', note: 'Shared files' });
+  const b = JSON.parse((await staff.post(`/api/staff/clients/${s.hp}/links`, { label: 'Your project board', url: 'https://app.clickup.com/9017740562/v/b/abc' })).text);
+  await staff.post(`/api/staff/clients/${s.hp}/links/${b.id}/up`, {});
+
+  const dash = JSON.parse((await dana.get('/api/client/dashboard')).text);
+  assert.deepEqual(dash.links, [
+    { label: 'Your project board', url: 'https://app.clickup.com/9017740562/v/b/abc', note: null, kind: 'clickup' },
+    { label: 'Your SharePoint folder', url: 'https://leadg2.sharepoint.com/sites/Clients/Harbor', note: 'Shared files', kind: 'sharepoint' },
+  ]);
+  assert.doesNotMatch(JSON.stringify(dash), new RegExp(DEMO_STAFF.email));
+  assert.deepEqual(JSON.parse((await pat.get('/api/client/dashboard')).text).links, []);
+  assert.equal((await staff.post(`/api/staff/clients/${s.bb}/links/${b.id}/remove`, {})).status, 404, 'a link is removed only through its own client');
+  assert.equal((await staff.post(`/api/staff/clients/${s.hp}/links/${b.id}/remove`, {})).status, 200);
+  assert.equal(JSON.parse((await dana.get('/api/client/dashboard')).text).links.length, 1);
+});

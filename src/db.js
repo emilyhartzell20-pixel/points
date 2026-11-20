@@ -295,6 +295,11 @@ function migrate(db) {
   if (!has('clients', 'hubspot_synced')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_synced TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS client_pages (client_id INTEGER PRIMARY KEY REFERENCES clients(id), html TEXT, url TEXT,
     file_name TEXT, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)`);
+  if (!has('client_feeds', 'scope')) db.exec("ALTER TABLE client_feeds ADD COLUMN scope TEXT NOT NULL DEFAULT 'list'");
+  if (!has('feed_items', 'list_id')) db.exec('ALTER TABLE feed_items ADD COLUMN list_id TEXT');
+  if (!has('feed_items', 'assigned_to_client')) db.exec('ALTER TABLE feed_items ADD COLUMN assigned_to_client INTEGER NOT NULL DEFAULT 0');
+  db.exec(`CREATE TABLE IF NOT EXISTS client_links (id INTEGER PRIMARY KEY, client_id INTEGER NOT NULL REFERENCES clients(id),
+    label TEXT NOT NULL, url TEXT NOT NULL, note TEXT, sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, created_by TEXT NOT NULL)`);
   if (!has('client_feeds', 'statuses')) db.exec('ALTER TABLE client_feeds ADD COLUMN statuses TEXT');
   if (!has('suggestions', 'evidence_date')) db.exec('ALTER TABLE suggestions ADD COLUMN evidence_date TEXT');
 }
