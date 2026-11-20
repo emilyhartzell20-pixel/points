@@ -31,6 +31,7 @@ function parseCookies(h) {
 }
 
 function send(res, status, body, headers = {}) {
+  if (process.env.NODE_ENV === 'production') headers = { 'Strict-Transport-Security': 'max-age=31536000', ...headers };
   const isJson = typeof body !== 'string' && !Buffer.isBuffer(body);
   res.writeHead(status, {
     'Content-Type': isJson ? 'application/json; charset=utf-8' : headers['Content-Type'] || 'text/plain; charset=utf-8',
@@ -57,7 +58,19 @@ function serveStatic(res, file) {
   send(res, 200, fs.readFileSync(p), { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
 }
 
-function createApp({ db, adapters = defaultAdapters(), secureCookies = process.env.NODE_ENV === 'production' } = {}) {
+function createApp({ db, adapters = defaultAdapters(), secureCookies = process.env.NODE_ENV === 'production', demo = false } = {}) {
+  // Sign-in throttle: at most 10 failed attempts per email and per IP in 15 minutes.
+  const failures = new Map();
+  const WINDOW = 15 * 60e3, LIMIT = 10;
+  const clientIp = (req) => (process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || '?';
+  const throttled = (keys) => keys.some((k) => { const f = failures.get(k); return f && Date.now() - f.first < WINDOW && f.count >= LIMIT; });
+  const recordFailure = (keys) => {
+    for (const k of keys) {
+      const f = failures.get(k);
+      if (!f || Date.now() - f.first >= WINDOW) failures.set(k, { first: Date.now(), count: 1 }); else f.count++;
+    }
+    if (failures.size > 10000) for (const [k, f] of failures) if (Date.now() - f.first >= WINDOW) failures.delete(k);
+  };
   const routes = [];
   const route = (method, pattern, role, handler) => {
     const keys = []; const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; })}$`);
@@ -70,8 +83,10 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
   // ---- auth
   route('POST', '/api/login', null, async ({ req, res }) => {
     const { email, password } = await readJson(req);
+    const keys = [`ip:${clientIp(req)}`, `email:${String(email || '').toLowerCase()}`];
+    if (throttled(keys)) throw new AppError(429, 'Too many sign-in attempts. Wait 15 minutes and try again.');
     const s = auth.login(db, email, password);
-    if (!s) throw new AppError(401, 'Email or password is incorrect');
+    if (!s) { recordFailure(keys); throw new AppError(401, 'Email or password is incorrect'); }
     if (s.user.role === 'client') {
       const c = db.prepare('SELECT portal_enabled FROM clients WHERE id = ?').get(s.user.client_id);
       if (!c || !c.portal_enabled) { auth.logout(db, s.token); throw new AppError(403, 'Your dashboard is not available yet. Your LeadG2 consultant will let you know when it is ready.'); }
@@ -83,6 +98,8 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
     auth.logout(db, token);
     send(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
   });
+  route('GET', '/api/config', null, ({ res }) => send(res, 200, { demo }));
+  route('GET', '/healthz', null, ({ res }) => { db.prepare('SELECT 1').get(); send(res, 200, { ok: true }); });
   route('GET', '/api/me', 'any', ({ res, user }) => send(res, 200, { user }));
 
   // ---- client (scope comes from the session ONLY)
@@ -267,8 +284,10 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
     try {
-      if (req.method === 'GET' && pages[url.pathname]) return serveStatic(res, pages[url.pathname]);
-      if (req.method === 'GET' && url.pathname.startsWith('/static/')) return serveStatic(res, url.pathname.slice(8));
+      const getLike = req.method === 'GET' || req.method === 'HEAD'; // HEAD: Node omits the body automatically
+      if (getLike && pages[url.pathname]) return serveStatic(res, pages[url.pathname]);
+      if (getLike && url.pathname.startsWith('/static/')) return serveStatic(res, url.pathname.slice(8));
+      if (req.method === 'HEAD' && url.pathname === '/healthz') return send(res, 200, '');
       const token = parseCookies(req.headers.cookie)[COOKIE];
       for (const r of routes) {
         if (r.method !== req.method) continue;
@@ -290,12 +309,21 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
 
 if (require.main === module) {
   const db = openDb();
-  if (!db.prepare(`SELECT 1 FROM users WHERE role = 'staff' LIMIT 1`).get()) {
-    console.error('No admin accounts yet. Run `npm run create-admin -- you@leadg2.com "Your Name"` first (or `npm run demo` for sample data).');
+  const hasAdmin = () => db.prepare(`SELECT 1 FROM users WHERE role = 'staff' LIMIT 1`).get();
+  if (!hasAdmin() && process.env.ADMIN_EMAIL) {
+    // First start on a host with no terminal: create the first admin and print their one-time setup link to the logs.
+    const admin = require('./admin');
+    const r = admin.inviteStaff(db, { email: process.env.ADMIN_EMAIL, name: process.env.ADMIN_NAME || process.env.ADMIN_EMAIL, actor: 'first-start' });
+    const base = (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+    console.log(`First admin created for ${process.env.ADMIN_EMAIL}. Open this link within 7 days to choose a password:\n  ${base}/setup#t=${r.token}`);
+  }
+  if (!hasAdmin()) {
+    console.error('No admin accounts yet. Set ADMIN_EMAIL (and ADMIN_NAME) and restart, or run `npm run create-admin -- you@leadg2.com "Your Name"`.');
     process.exit(1);
   }
+  if (process.env.NODE_ENV === 'production' && !process.env.PUBLIC_URL) console.warn('PUBLIC_URL is not set: invite links will use the request host.');
   const port = Number(process.env.PORT || 3000);
-  http.createServer(createApp({ db })).listen(port, () => console.log(`LeadG2 points tracker on http://localhost:${port}`));
+  http.createServer(createApp({ db, demo: process.env.DEMO_MODE === '1' })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
 }
 
 module.exports = { createApp };

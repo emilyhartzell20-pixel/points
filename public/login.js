@@ -1,4 +1,6 @@
 'use strict';
+// Demo sign-in hints appear only when the server runs with sample data.
+fetch('/api/config').then((r) => r.json()).then((c) => { if (c.demo) document.getElementById('demo-hint').hidden = false; }).catch(() => {});
 document.getElementById('login').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);

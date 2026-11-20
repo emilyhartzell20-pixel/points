@@ -30,7 +30,7 @@ const { createApp } = require('../src/server');
   }
   if (args.has('--no-serve')) return;
   const port = Number(process.env.PORT || 3000);
-  http.createServer(createApp({ db })).listen(port, () => {
+  http.createServer(createApp({ db, demo: true })).listen(port, () => {
     console.log(`\nOpen http://localhost:${port}`);
     console.log('  Staff:  consultant@leadg2.example / demo-consultant');
     console.log('  Client: dana@harborpoint.example / demo-client' + (args.has('--auto-review') ? '' : '  (grant access in Staff → Client preview first)'));

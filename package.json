@@ -13,6 +13,7 @@
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.js",
     "demo:reviewed": "node --disable-warning=ExperimentalWarning scripts/demo.js --auto-review",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
-    "create-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js"
+    "create-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
+    "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js"
   }
 }

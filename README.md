@@ -23,6 +23,24 @@ Use the **+ Add points** button in the staff console (top right, and on the Ledg
 - **Log work:** for work that never showed up in ClickUp or email, such as a call, a Teams message or a hallway request. Pick a menu item or "Custom – not on the menu", set the status (completed uses points, approved reserves them, planned is forecast only), and say how you know it was approved. Custom work and amounts outside the menu need a "why this amount" note. You can attach an optional evidence link, which stays internal. A live preview shows how the balance will change before you save. Each entry is logged with your name.
 - **Add to allocation:** for bonus points or additional purchased points. This requires a reference to the signed agreement or order form.
 
+## Publishing (hosting)
+
+The app ships as a container (`Dockerfile`) with no dependencies. Any host that runs a container with a **persistent disk** will work.
+- Mount a persistent volume at `/data`, where the database lives.
+- Set these environment variables:
+
+| Variable | Value |
+|---|---|
+| `PUBLIC_URL` | The public address, e.g. `https://points.leadg2.com` (used in invite links) |
+| `ADMIN_EMAIL`, `ADMIN_NAME` | Used once, on first start, to create the first admin. Their one-time setup link is printed in the server logs. |
+| `TRUST_PROXY` | `1` when behind the host's HTTPS proxy, so sign-in throttling sees real visitor addresses |
+| `CONNECTOR_MODE` + ClickUp/Outlook credentials | Only when you're ready to connect live accounts (see below) |
+
+`NODE_ENV=production` is set in the container. It turns on Secure cookies and HSTS, and it hides the demo sign-in hints.
+- **Health check:** `GET /healthz`.
+- **Backups:** `npm run backup` writes a snapshot to `/data/backups` and keeps the latest 30. Run it on a daily schedule, and also use your host's volume snapshots.
+- **Sign-in protection:** 10 failed attempts per email or IP in 15 minutes blocks further tries for that window.
+
 ## The admin area
 
 Sign in as staff and click **Admin** at the top right. It has three tabs:
