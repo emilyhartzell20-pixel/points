@@ -26,8 +26,8 @@ test('health check works; demo hints only in demo mode; HSTS only in production'
   const demo = await startServer(createApp({ db: s.db, adapters: {}, demo: true }));
   t.after(() => Promise.all([prod.close(), demo.close()]));
   assert.equal((await client(prod.base).get('/healthz')).status, 200);
-  assert.deepEqual((await client(prod.base).get('/api/config')).body, { demo: false });
-  assert.deepEqual((await client(demo.base).get('/api/config')).body, { demo: true });
+  assert.equal((await client(prod.base).get('/api/config')).body.demo, false);
+  assert.equal((await client(demo.base).get('/api/config')).body.demo, true);
 });
 
 test('first start on a fresh host creates the first admin from ADMIN_EMAIL and logs a setup link', async (t) => {

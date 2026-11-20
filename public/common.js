@@ -1,4 +1,9 @@
 'use strict';
+// Show which version (commit) is running in the footer, so it's easy to check a deploy went out.
+fetch('/api/config').then((r) => r.json()).then((c) => {
+  const f = document.querySelector('.site-footer .brand-word');
+  if (c.version && f) f.append(` · version ${c.version}`);
+}).catch(() => {});
 // Use the official LeadG2 logo if one has been dropped into public/brand/; otherwise keep the text wordmark.
 document.querySelectorAll('.brand-logo').forEach((img) => {
   const show = () => { img.hidden = false; const w = img.parentElement.querySelector('.brand-word'); if (w) w.hidden = true; };

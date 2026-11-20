@@ -112,8 +112,8 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     auth.logout(db, token);
     send(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
   });
-  route('GET', '/api/config', null, ({ res }) => send(res, 200, { demo }));
-  route('GET', '/healthz', null, ({ res }) => { db.prepare('SELECT 1').get(); send(res, 200, { ok: true }); });
+  route('GET', '/api/config', null, ({ res }) => send(res, 200, { demo, version: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null }));
+  route('GET', '/healthz', null, ({ res }) => { db.prepare('SELECT 1').get(); send(res, 200, { ok: true, version: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null }); });
   route('GET', '/api/me', 'any', ({ res, user }) => send(res, 200, { user }));
 
   // ---- client (scope comes from the session ONLY)
