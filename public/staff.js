@@ -256,6 +256,7 @@ async function renderMonths() {
   const b = state.overview.balance;
   const jump = (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
   return h('div', {},
+    renderOutlook(data.look_ahead, { showPlanned: true }),
     h('section', { class: 'card' },
       h('div', { class: 'toolbar' }, h('h2', {}, 'Points by ', h('em', {}, 'month')),
         h('span', { class: 'muted small' }, `${b.used} used · ${b.committed} committed · ${b.forecast} planned of ${b.allocated}`)),
@@ -761,13 +762,14 @@ async function renderMenu() {
       code: h('input', { value: i ? i.code : '', placeholder: 'LP-BUILD', size: '10', 'aria-label': 'Short code' }),
       min: h('input', { type: 'number', min: '0', step: '1', value: i ? i.points_min : '', class: 'pts-in', 'aria-label': 'Points (min)' }),
       max: h('input', { type: 'number', min: '0', step: '1', value: i && i.points_max !== i.points_min ? i.points_max : '', placeholder: 'same', class: 'pts-in', 'aria-label': 'Points (max, for ranges)' }),
+      category: h('input', { value: i ? (i.category || '') : '', placeholder: 'e.g. Sales', 'aria-label': 'Category (shown to clients as the type)' }),
       keywords: h('input', { value: i ? i.keywords.join(', ') : '', placeholder: 'landing page, lp', 'aria-label': 'Matching keywords' }),
       notes: h('input', { value: i ? (i.notes || '') : '', placeholder: 'optional', 'aria-label': 'Notes' }),
     };
     const save = () => act(() => api(`/api/staff/menus/${v.id}/items`, { itemId: i ? i.id : null, name: f.name.value, code: f.code.value,
-      pointsMin: f.min.value, pointsMax: f.max.value, keywords: f.keywords.value, notes: f.notes.value }), i ? 'Item saved' : 'Item added');
+      pointsMin: f.min.value, pointsMax: f.max.value, category: f.category.value, keywords: f.keywords.value, notes: f.notes.value }), i ? 'Item saved' : 'Item added');
     return h('tr', { class: i ? '' : 'new-row' },
-      h('td', {}, f.name), h('td', {}, f.code), h('td', {}, f.min), h('td', {}, f.max), h('td', {}, f.keywords), h('td', {}, f.notes),
+      h('td', {}, f.name), h('td', {}, f.code), h('td', {}, f.min), h('td', {}, f.max), h('td', {}, f.category), h('td', {}, f.keywords), h('td', {}, f.notes),
       h('td', { class: 'row-actions' }, h('button', { class: i ? '' : 'primary', onclick: save }, i ? 'Save' : '+ Add'),
         i ? h('button', { class: 'danger', onclick: () => {
           if (!confirm(`Remove "${i.name}" from menu ${v.code}? Work already approved with it is not affected.`)) return;
@@ -785,7 +787,7 @@ async function renderMenu() {
   const items = h('section', { class: 'card' }, h('h2', {}, 'Menu items'), importBox,
     h('p', { class: 'muted small' }, 'For a fixed price, fill in only "Points". For a range (reviewer confirms the amount), also fill in "Up to". Keywords help the app recognize the item in ClickUp tasks and emails.'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
-      h('thead', {}, h('tr', {}, ['Item', 'Code', 'Points', 'Up to', 'Keywords', 'Notes', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['Item', 'Code', 'Points', 'Up to', 'Category (client sees)', 'Keywords', 'Internal notes', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, v.items.map(itemRow), itemRow(null)))));
 
   // New version

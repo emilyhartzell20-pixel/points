@@ -44,8 +44,8 @@ function createMenuVersion(db, { code, name, effectiveDate, copyFromId, actor })
     const id = Number(r.lastInsertRowid);
     if (copyFromId) {
       getVersion(db, copyFromId);
-      db.prepare(`INSERT INTO menu_items (menu_version_id, code, name, points_min, points_max, keywords, notes)
-                  SELECT ?, code, name, points_min, points_max, keywords, notes FROM menu_items WHERE menu_version_id = ?`).run(id, copyFromId);
+      db.prepare(`INSERT INTO menu_items (menu_version_id, code, name, points_min, points_max, keywords, notes, category)
+                  SELECT ?, code, name, points_min, points_max, keywords, notes, category FROM menu_items WHERE menu_version_id = ?`).run(id, copyFromId);
     }
     audit(db, { actor, action: 'menu.version.create', entity: 'menu_version', entityId: id, detail: { code, copy_from: copyFromId || null } });
     return getVersion(db, id);
@@ -61,7 +61,7 @@ function updateMenuVersion(db, { id, name, effectiveDate, actor }) {
 }
 
 /** Add or edit a menu item. A range is points_min < points_max; a fixed price has them equal. */
-function saveMenuItem(db, { versionId, itemId, code, name, pointsMin, pointsMax, keywords, notes, actor }) {
+function saveMenuItem(db, { versionId, itemId, code, name, pointsMin, pointsMax, keywords, notes, category, actor }) {
   getVersion(db, versionId);
   code = String(code || '').trim().toUpperCase().replace(/\s+/g, '-');
   name = String(name || '').trim();
@@ -77,13 +77,13 @@ function saveMenuItem(db, { versionId, itemId, code, name, pointsMin, pointsMax,
     if (itemId) {
       const before = db.prepare('SELECT * FROM menu_items WHERE id = ? AND menu_version_id = ?').get(itemId, versionId);
       if (!before) throw new AppError(404, 'Menu item not found');
-      db.prepare('UPDATE menu_items SET code=?, name=?, points_min=?, points_max=?, keywords=?, notes=? WHERE id=?').run(code, name, min, max, kw, notes || null, itemId);
+      db.prepare('UPDATE menu_items SET code=?, name=?, points_min=?, points_max=?, keywords=?, notes=?, category=COALESCE(?, category) WHERE id=?').run(code, name, min, max, kw, notes || null, category === undefined ? null : (String(category).trim() || null), itemId);
       id = Number(itemId);
       audit(db, { actor, action: 'menu.item.update', entity: 'menu_item', entityId: id,
         detail: { version_id: versionId, from: { code: before.code, name: before.name, min: before.points_min, max: before.points_max }, to: { code, name, min, max } } });
     } else {
-      id = Number(db.prepare('INSERT INTO menu_items (menu_version_id, code, name, points_min, points_max, keywords, notes) VALUES (?,?,?,?,?,?,?)')
-        .run(versionId, code, name, min, max, kw, notes || null).lastInsertRowid);
+      id = Number(db.prepare('INSERT INTO menu_items (menu_version_id, code, name, points_min, points_max, keywords, notes, category) VALUES (?,?,?,?,?,?,?,?)')
+        .run(versionId, code, name, min, max, kw, notes || null, category ? String(category).trim() : null).lastInsertRowid);
       audit(db, { actor, action: 'menu.item.create', entity: 'menu_item', entityId: id, detail: { version_id: versionId, code, name, min, max } });
     }
     return db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
@@ -334,10 +334,10 @@ function importMenuCsv(db, { versionId, csv, actor }) {
     for (const r of rows) {
       const code = (r.code || r.name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
       const existing = db.prepare('SELECT id FROM menu_items WHERE menu_version_id = ? AND code = ?').get(versionId, code);
-      const notes = [r.category, r.notes].map((x) => (x || '').trim()).filter(Boolean).join(' · ') || null;
+      const notes = (r.notes || '').trim() || null;
       try {
         saveMenuItem(db, { versionId, itemId: existing ? existing.id : null, code, name: r.name, pointsMin: r.points_min,
-          pointsMax: r.points_max || r.points_min, keywords: r.keywords, notes, actor });
+          pointsMax: r.points_max || r.points_min, keywords: r.keywords, notes, category: r.category || null, actor });
       } catch (e) { throw new AppError(400, `Line ${r.__line} (${r.name || code}): ${e.message}`); }
       if (existing) updated++; else added++;
     }

@@ -22,7 +22,7 @@ test('the LeadG2 2026 menu template loads all 40 items with the right point valu
   assert.deepEqual([item('LP').points_min, item('LP-FULL').points_min], [3, 5]);
   assert.deepEqual([item('EBOOK').points_min, item('EBOOK').points_max], [8, 13]);
   assert.deepEqual([item('VIDEO-30').points_min, item('VIDEO-60').points_min, item('VIDEO-90').points_min], [7, 9, 11]);
-  assert.match(item('SALES-EMAIL').notes, /Sales · Per email/);
+  assert.deepEqual([item('SALES-EMAIL').category, item('SALES-EMAIL').notes], ['Sales', 'Per email']);
   // Re-importing an edited file updates prices instead of duplicating.
   const csv = 'code,name,points_min,points_max\nLP,Landing page,4,4\nNEW-THING,Brand new item,2,\n';
   assert.deepEqual(admin.importMenuCsv(db, { versionId: r.id, csv, actor: 't' }), { added: 1, updated: 1 });

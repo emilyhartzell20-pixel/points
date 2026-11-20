@@ -68,6 +68,7 @@ function renderClientView(v) {
       stat('Available', v.balance.available, 'available', 'Allocated − used − committed')),
     showPlanned ? h('p', { class: 'planned-note' }, h('span', { class: 'tip-key seg-planned' }),
       `${v.planned.points} more points are planned. If all planned work goes ahead, ${v.planned.available_after} points remain.`) : null,
+    months ? renderOutlook(months.look_ahead, { showPlanned, forClient: true }) : null,
     months ? h('section', { class: 'card' }, h('h2', {}, 'Points by ', h('em', {}, 'month')), monthChart(months.months, {
       showPlanned, onPick: (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } })) : null,
     months ? h('section', { class: 'card' }, h('h2', {}, 'Your work, ', h('em', {}, 'month by month')),
@@ -180,4 +181,29 @@ function monthList(data, { renderItem, showPlanned = true, forClient = false }) 
         : h('p', { class: 'muted small empty-month' }, 'Nothing scheduled.')));
   }
   return h('div', { class: 'month-list' }, data.types.length ? filterBar : null, ...sections);
+}
+
+/** "Looking ahead": each month from now to the end of the contract, and what remains after it. */
+function renderOutlook(o, { showPlanned = true, forClient = false } = {}) {
+  if (!o || !o.months.length) return null;
+  const endLabel = fmtDate(o.term_end);
+  const over = o.remaining_at_end < 0;
+  const rows = o.months.map((m) => h('tr', { class: `${m.key === o.from ? 'now' : ''}${m.after_term ? ' after-term' : ''}${m.key === 'earlier' ? ' earlier' : ''}` },
+    h('td', {}, m.label, m.key === o.from ? h('span', { class: 'now-pill' }, 'This month') : null, m.after_term ? h('span', { class: 'muted small' }, ' · after contract end') : null),
+    h('td', { class: 'num' }, m.committed ? `${m.committed}` : '–'),
+    showPlanned ? h('td', { class: 'num' }, m.planned ? `${m.planned}` : '–') : null,
+    h('td', { class: `num remaining${m.remaining_after < 0 ? ' neg' : ''}` }, m.remaining_after < 0 ? `⚠ ${m.remaining_after}` : String(m.remaining_after))));
+  return h('section', { class: 'card outlook' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Looking ', h('em', {}, 'ahead')),
+      h('span', { class: 'muted small' }, `Contract runs through ${endLabel} · ${o.months_left} month${o.months_left === 1 ? '' : 's'} left`)),
+    h('p', { class: `outlook-summary${over ? ' neg' : ''}` }, over
+      ? `⚠ If everything ${showPlanned ? 'planned' : 'approved'} goes ahead, the allocation runs out: ${Math.abs(o.remaining_at_end)} points over by ${endLabel}.`
+      : showPlanned
+        ? `${o.available_now} points available today. If everything planned goes ahead, ${o.remaining_at_end} points remain at the end of the contract (${endLabel}).`
+        : `${o.available_now} points available today, through the end of the contract (${endLabel}).`),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'outlook-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Month'), h('th', { class: 'num' }, 'Approved'), showPlanned ? h('th', { class: 'num' }, 'Planned') : null,
+        h('th', { class: 'num' }, forClient ? 'Points left after' : 'Remaining after'))),
+      h('tbody', {}, rows))),
+    h('p', { class: 'muted small' }, 'Approved points are already reserved, so they’re included in today’s available number. Planned points come off as each month goes ahead.'));
 }

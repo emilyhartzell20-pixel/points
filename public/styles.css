@@ -302,3 +302,11 @@ button.type-chip { cursor: pointer; }
   .month-name { flex-wrap: wrap; }
 }
 .now-pill { white-space: nowrap; }
+.outlook-summary { font-family: var(--font-serif); font-size: 1.02rem; margin: 0 0 10px; }
+.outlook-summary.neg, .outlook-table .neg { color: var(--err); font-weight: 700; }
+.outlook-table td:first-child { white-space: normal; }
+.outlook-table tr.now td { font-weight: 800; }
+.outlook-table tr.now .now-pill { margin-left: 8px; }
+.outlook-table tr.earlier td { color: var(--muted); font-style: italic; }
+.outlook-table td.remaining { font-family: var(--font-head); font-weight: 800; }
+.outlook-table tr:last-child td { border-bottom: none; }

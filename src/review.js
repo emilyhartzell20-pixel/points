@@ -91,7 +91,7 @@ function approveSuggestion(db, p) {
         }
         const dept = db.prepare(`SELECT json_extract(r.data, '$.department') d FROM suggestion_evidence se JOIN source_records r ON r.id = se.source_record_id
           WHERE se.suggestion_id = ? AND json_extract(r.data, '$.department') IS NOT NULL LIMIT 1`).get(s.id);
-        const category = (dept && dept.d) || (menuItem.notes ? String(menuItem.notes).split(' · ')[0] : null);
+        const category = (dept && dept.d) || menuItem.category || null;
         const item = ledger.createWorkItem(db, {
           category,
           clientId: s.client_id, state, points, title: p.title || s.title, groupKey: s.group_key,

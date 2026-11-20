@@ -59,7 +59,7 @@ function importTracker(db, { clientId, csv, actor, opening = false, filename = '
       const existing = db.prepare('SELECT * FROM work_items WHERE client_id = ? AND external_ref = ?').get(clientId, ref);
       if (existing) {
         skipped++;
-        const cat = r.category || (r.notes && !/\d/.test(r.notes.split(';')[0]) ? r.notes.split(';')[0].trim() : null);
+        const cat = r.category || null;
         if (!existing.category && cat) db.prepare('UPDATE work_items SET category = ? WHERE id = ?').run(cat, existing.id);
         if (existing.points !== points || existing.state !== state) conflicts.push({ line: r.__line, tracker_id: r.tracker_id, note: `Ledger has ${existing.points} pts ${existing.state}; file has ${points} ${state}. Not overwritten — use a correction.` });
         continue;
@@ -69,7 +69,7 @@ function importTracker(db, { clientId, csv, actor, opening = false, filename = '
         clientId, state, points, title: r.title, clientSummary: r.client_summary || null, summaryApproved: !!r.client_summary,
         externalRef: ref, groupKey: r.clickup_task_id ? `clickup:${r.clickup_task_id.toLowerCase()}` : null,
         menuItemCode: menu ? menu.code : (r.menu_code || null), menuItemName: menu ? menu.name : null,
-        workDate: r.date, origin: opening ? 'opening' : 'import', internalNotes: r.notes || null, actor, category: r.category || (r.notes && !/\d/.test(r.notes.split(';')[0]) ? r.notes.split(';')[0].trim() : null) || (menu && menu.notes ? menu.notes.split(' · ')[0] : null),
+        workDate: r.date, origin: opening ? 'opening' : 'import', internalNotes: r.notes || null, actor, category: r.category || (menu && menu.category) || null,
         reason: opening ? `Opening balance from tracker (${filename})` : `Imported from ${filename}`,
         overrideReason: r.override_reason || undefined,
       });
@@ -111,7 +111,7 @@ function manualEntry(db, p) {
     externalRef: ref, menuVersionId: menu ? menu.menu_version_id : undefined, menuItemCode: menu ? menu.code : null,
     menuItemName: menu ? menu.name : 'Custom (not on menu)', workDate: p.workDate,
     origin: 'manual', internalNotes: notes, actor: p.actor,
-    category: p.category || (menu && menu.notes ? menu.notes.split(' · ')[0] : 'Custom'),
+    category: p.category || (menu && menu.category) || 'Custom',
     reason: [p.reason, p.exceptionReason && `${menu ? 'Exception' : 'Custom pricing'}: ${p.exceptionReason}`].filter(Boolean).join(' · '), overrideReason: p.overrideReason,
   });
   return { item, duplicate: false };

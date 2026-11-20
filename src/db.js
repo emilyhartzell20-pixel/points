@@ -257,6 +257,15 @@ function migrate(db) {
   const has = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
   if (!has('users', 'password_set')) db.exec('ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1');
   if (!has('clients', 'pilot')) db.exec('ALTER TABLE clients ADD COLUMN pilot INTEGER NOT NULL DEFAULT 0');
+  if (!has('menu_items', 'category')) {
+    db.exec('ALTER TABLE menu_items ADD COLUMN category TEXT');
+    // Menus loaded from the LeadG2 template stored the category as the first part of the notes.
+    db.exec(`UPDATE menu_items SET category = CASE
+        WHEN notes LIKE 'Consulting & Support%' THEN 'Consulting & Support'
+        WHEN notes LIKE 'Content/Promotion%' THEN 'Content/Promotion'
+        WHEN notes = 'Sales' OR notes LIKE 'Sales · %' THEN 'Sales' END
+      WHERE category IS NULL`);
+  }
   if (!has('work_items', 'category')) db.exec('ALTER TABLE work_items ADD COLUMN category TEXT');
   if (!has('clients', 'show_planned')) db.exec('ALTER TABLE clients ADD COLUMN show_planned INTEGER NOT NULL DEFAULT 1');
   if (!has('clients', 'hubspot_company_id')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_company_id TEXT');
