@@ -288,6 +288,42 @@ function evaluateGroup(db, clientId, groupKey) {
   return { action, evidenceDate, title, item, menu, proposed, pmin, pmax, hours, flags: [...flags], rationale: lines.join('\n'), evidence, evidenceHash };
 }
 
+// Month headings like "February 2027" are how the tracker schedules work: moving a task under a different
+// heading moves it to that month. When a task sits under such a heading, the heading wins over the
+// Delivery Month field; otherwise the field is used.
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+function headingMonth(title) {
+  const m = /^\s*([a-z]+)\s+(\d{4})\s*$/i.exec(String(title || ''));
+  if (!m) return null;
+  const i = MONTHS.indexOf(m[1].toLowerCase());
+  return i < 0 ? null : `${m[2]}-${String(i + 1).padStart(2, '0')}-01`;
+}
+
+// Scheduling details from a points tracker (Delivery Month, Department) don't change any balance, so a
+// sync applies them to the matching ledger item directly. Points and stage still go through review.
+function applyTrackerDetails(db, clientId, actor = 'clickup-sync') {
+  const rows = db.prepare(`SELECT w.id, w.work_date, w.category, json_extract(r.data, '$.delivery_month') AS field_month,
+      json_extract(r.data, '$.department') AS dept, r.title, hd.title AS heading
+    FROM work_items w JOIN source_records r ON r.client_id = w.client_id AND r.group_key = w.group_key
+    LEFT JOIN source_records hd ON hd.source_type = 'clickup_task' AND hd.external_id = json_extract(r.data, '$.raw_parent')
+    WHERE w.client_id = ? AND r.source_type = 'clickup_task' AND json_extract(r.data, '$.from_tracker') = 1
+      AND json_extract(r.data, '$.parent_id') IS NULL`).all(clientId);
+  let changed = 0;
+  for (const r of rows) {
+    const month = headingMonth(r.heading) || (r.field_month ? String(r.field_month).slice(0, 10) : null);
+    const updates = {};
+    if (month && month.slice(0, 7) !== String(r.work_date).slice(0, 7)) updates.work_date = month;
+    if (r.dept && r.dept !== r.category) updates.category = r.dept;
+    if (!Object.keys(updates).length) continue;
+    db.prepare(`UPDATE work_items SET work_date = COALESCE(?, work_date), category = COALESCE(?, category), updated_at = ? WHERE id = ?`)
+      .run(updates.work_date || null, updates.category || null, nowIso(), r.id);
+    audit(db, { clientId, actor, action: 'work_item.tracker_update', entity: 'work_item', entityId: r.id,
+      detail: { from: { month: String(r.work_date).slice(0, 7), type: r.category }, to: { month: updates.work_date && updates.work_date.slice(0, 7), type: updates.category } } });
+    changed++;
+  }
+  return changed;
+}
+
 const STAGE = { forecast: 0, approve: 1, change: 1, support_hours: 1, cancel: 2, complete: 2 };
 
 function generateSuggestions(db, clientId) {
@@ -376,7 +412,7 @@ async function syncSource(db, { clientId, source, adapter, actor = 'system', ful
         if (res.outcome === 'updated') stats.updated++;
       }
     });
-    for (const cid of touched) generateSuggestions(db, cid);
+    for (const cid of touched) { stats.rescheduled = (stats.rescheduled || 0) + tx(db, () => applyTrackerDetails(db, cid)); generateSuggestions(db, cid); }
     db.prepare(`UPDATE sync_runs SET status='success', finished_at=?, records_seen=?, records_new=?, records_updated=? WHERE id=?`)
       .run(nowIso(), stats.seen, stats.new, stats.updated, runId);
     audit(db, { clientId, actor, action: `sync.${source}.success`, detail: stats });
@@ -437,14 +473,15 @@ async function importTrackerFromClickUp(db, { clientId, adapter, actor }) {
   if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
   const mappings = mappingsFor(db, clientId).filter((m) => m.source_type.startsWith('clickup') && m.scope === 'points');
   if (!mappings.length) throw Object.assign(new Error('Add the client\'s ClickUp tracker list under "Where the work comes from" first'), { status: 409 });
-  const tasks = (await fetchClickUp(adapter, { mappings, aliases: [], since: null }))
-    .filter((t) => t.data.from_tracker && t.data.points != null);
+  const all = await fetchClickUp(adapter, { mappings, aliases: [], since: null });
+  const titles = Object.fromEntries(all.map((t) => [t.external_id, t.title]));
+  const tasks = all.filter((t) => t.data.from_tracker && t.data.points != null);
   if (!tasks.length) throw Object.assign(new Error('No tasks with "Total Points" were found in the mapped ClickUp lists'), { status: 409 });
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = tasks.map((t) => {
     const sig = clickupSignal(t.status);
     const state = TRACKER_STATE[sig] || 'forecast';
-    const date = (t.data.delivery_month || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
+    const date = (headingMonth(titles[t.data.raw_parent]) || t.data.delivery_month || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
     const notes = [t.data.department, t.data.point_value != null && t.data.how_many != null ? `${t.data.point_value} pts x ${t.data.how_many}` : '', t.data.tracker_notes].filter(Boolean).join('; ');
     return [q(`CU-${t.external_id}`), date, q(t.title.trim()), q(t.title.trim()), '', Math.round(t.data.points), state, q(t.external_id), q(notes), q(t.data.department || '')].join(',');
   });

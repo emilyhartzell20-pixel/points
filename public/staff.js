@@ -371,7 +371,7 @@ function renderSources() {
       key !== 'tracker' && mode !== 'not_connected' ? h('button', { class: 'primary', disabled: !mapped, onclick: () => act(async () => {
         const r = await api(`/api/staff/clients/${state.clientId}/sync`, { source: key });
         if (r[key].status === 'failed') throw new Error(`Sync failed: ${r[key].error}`);
-        toast(`Synced: ${r[key].new} new, ${r[key].updated} updated. Check the Review queue.`);
+        toast(`Synced: ${r[key].new} new, ${r[key].updated} updated${r[key].rescheduled ? `, ${r[key].rescheduled} moved to a new month or type` : ''}. Check the Review queue.`);
       }) }, `Sync ${label} now`) : null);
   };
   return h('div', {},

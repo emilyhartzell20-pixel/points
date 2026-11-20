@@ -121,3 +121,47 @@ test('the first live sync ignores earlier sample-data runs when choosing what to
   await ingest.syncSource(db, { clientId, source: 'clickup', adapter: { mode: 'live', fetchTasks: async ({ since }) => { asked = since; return []; } } });
   assert.equal(asked, '2026-11-20T00:00:00.000Z', 'falls back to the opening-balance date, not the sample run');
 });
+
+test('changing Delivery Month or Department in ClickUp moves the item on the next sync, without review', async () => {
+  const db = openDb(':memory:');
+  const menu = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 't' });
+  const c = admin.createClient(db, { name: 'Questco', termStart: '2026-04-01', termEnd: '2027-03-31', menuVersionId: menu.id, agreementRef: 'x', basePoints: 900, actor: 't' });
+  admin.addMapping(db, { clientId: c.id, sourceType: 'clickup_list', value: '900900', scope: 'points', actor: 't' });
+  const month = (iso) => ({ name: '📆 Delivery Month', type: 'date', value: String(Date.parse(iso)) });
+  const placeholder = (when, dept) => {
+    const t = task('ph', 'New Website/CRC Promotion Placeholder', 'm-dec', { status: 'opt-p', total: 50, pv: 50, hm: 1, dept });
+    t.custom_fields.push(month(when)); return t;
+  };
+  let tasks = [placeholder('2026-08-01T00:00:00Z', 'd-m')];
+  const adapter = { mode: 'live', fetchTasks: async () => tasks };
+  await ingest.importTrackerFromClickUp(db, { clientId: c.id, adapter, actor: 't' });
+  const item = () => db.prepare(`SELECT work_date, category, state, points FROM work_items WHERE external_ref = 'tracker:CU-ph'`).get();
+  assert.equal(item().work_date.slice(0, 7), '2026-08');
+
+  tasks = [placeholder('2026-12-01T00:00:00Z', 'd-m')];
+  tasks[0].date_updated = String(Date.now());
+  const r = await ingest.syncSource(db, { clientId: c.id, source: 'clickup', adapter });
+  assert.equal(r.rescheduled, 1);
+  assert.deepEqual([item().work_date.slice(0, 7), item().state, item().points], ['2026-12', 'forecast', 50], 'moved to December; stage and points untouched');
+  assert.equal(review.listSuggestions(db, c.id, 'open').length, 0, 'nothing to review');
+  assert.ok(db.prepare(`SELECT 1 FROM audit_log WHERE action = 'work_item.tracker_update'`).get(), 'logged');
+});
+
+test('moving a task under a different month heading in ClickUp moves it in the app (heading beats the date field)', async () => {
+  const db = openDb(':memory:');
+  const menu = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 't' });
+  const c = admin.createClient(db, { name: 'Questco', termStart: '2026-04-01', termEnd: '2027-03-31', menuVersionId: menu.id, agreementRef: 'x', basePoints: 900, actor: 't' });
+  admin.addMapping(db, { clientId: c.id, sourceType: 'clickup_list', value: '900900', scope: 'points', actor: 't' });
+  const aug = task('m-aug', 'August 2026', null); const feb = task('m-feb', 'February 2027', null);
+  const ph = (parent) => { const t = task('ph', 'New Website/CRC Promotion Placeholder', parent, { status: 'opt-p', total: 50, pv: 50, hm: 1 });
+    t.custom_fields.push({ name: '📆 Delivery Month', type: 'date', value: String(Date.parse('2026-08-01T00:00:00Z')) }); return t; };
+  let tasks = [aug, feb, ph('m-aug')];
+  const adapter = { mode: 'live', fetchTasks: async () => tasks };
+  await ingest.importTrackerFromClickUp(db, { clientId: c.id, adapter, actor: 't' });
+  const month = () => db.prepare(`SELECT substr(work_date, 1, 7) m FROM work_items WHERE external_ref = 'tracker:CU-ph'`).get().m;
+  assert.equal(month(), '2026-08');
+  tasks = [aug, feb, { ...ph('m-feb'), date_updated: String(Date.now()) }]; // moved under February; date field unchanged
+  const r = await ingest.syncSource(db, { clientId: c.id, source: 'clickup', adapter });
+  assert.equal(r.rescheduled, 1);
+  assert.equal(month(), '2027-02');
+});
