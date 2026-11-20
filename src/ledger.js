@@ -31,6 +31,7 @@ function balance(db, clientId) {
     allocated, used, committed,
     available: allocated - used - committed,
     forecast: Number(forecast), // planned work: shown for planning only, never reduces available
+    available_after_planned: allocated - used - committed - Number(forecast),
     allocation_breakdown: { base: Number(alloc.base), bonus: Number(alloc.bonus), purchase: Number(alloc.purchase) },
     term_start: contract.term_start, term_end: contract.term_end,
     last_updated: lastUpdated,
@@ -79,7 +80,9 @@ function createWorkItem(db, p) {
       p.summaryApproved ? 1 : 0, p.state, p.points, p.menuVersionId ?? contract.menu_version_id,
       p.menuItemCode || null, p.menuItemName || null, p.workDate || nowIso().slice(0, 10), p.origin,
       p.internalNotes || null, p.actor, nowIso(), nowIso());
-    const item = getItem(db, Number(r.lastInsertRowid));
+    const item0 = getItem(db, Number(r.lastInsertRowid));
+    if (p.category) db.prepare('UPDATE work_items SET category = ? WHERE id = ?').run(String(p.category).trim().slice(0, 60), item0.id);
+    const item = getItem(db, item0.id);
     const evType = p.origin === 'opening' ? 'opening' : null;
     if (p.state === 'committed') addEvent(db, item, evType || 'reserve', p.points, 0, p.actor, p.reason);
     if (p.state === 'used') addEvent(db, item, evType || 'consume_direct', 0, p.points, p.actor, p.reason);

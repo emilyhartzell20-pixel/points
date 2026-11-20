@@ -149,6 +149,14 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     const ev = db.prepare(`SELECT r.source_type, r.title, r.url FROM work_item_evidence we JOIN source_records r ON r.id = we.source_record_id WHERE we.work_item_id = ?`);
     send(res, 200, ledger.listItems(db, id).map((w) => ({ ...w, evidence: ev.all(w.id) })));
   });
+  route('GET', '/api/staff/clients/:id/by-month', 'staff', ({ res, p }) =>
+    send(res, 200, require('./months').byMonth(db, clientExists(int(p.id)))));
+  route('POST', '/api/staff/clients/:id/show-planned', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const { enabled } = await readJson(req);
+    db.prepare('UPDATE clients SET show_planned = ? WHERE id = ?').run(enabled ? 1 : 0, id);
+    audit(db, { clientId: id, actor: user.email, action: enabled ? 'client_view.show_planned' : 'client_view.hide_planned' });
+    send(res, 200, { show_planned: !!enabled });
+  });
   route('GET', '/api/staff/clients/:id/ledger', 'staff', ({ res, p }) => send(res, 200, ledger.listEvents(db, clientExists(int(p.id)))));
   route('GET', '/api/staff/clients/:id/audit', 'staff', ({ res, p }) =>
     send(res, 200, db.prepare('SELECT * FROM audit_log WHERE client_id = ? ORDER BY id DESC LIMIT 300').all(clientExists(int(p.id)))));

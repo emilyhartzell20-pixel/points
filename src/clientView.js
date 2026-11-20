@@ -3,9 +3,10 @@
 // allow-list of fields, so email bodies, internal notes, review suggestions, source links and other
 // clients' data cannot leak. Staff "preview" calls this exact function.
 const ledger = require('./ledger');
+const { byMonth } = require('./months');
 
 function clientDashboard(db, clientId) {
-  const client = db.prepare('SELECT id, name FROM clients WHERE id = ?').get(clientId);
+  const client = db.prepare('SELECT id, name, show_planned FROM clients WHERE id = ?').get(clientId);
   if (!client) return null;
   const b = ledger.balance(db, clientId);
   const items = db.prepare(`SELECT id, state, points, work_date, client_summary, summary_approved FROM work_items
@@ -28,6 +29,8 @@ function clientDashboard(db, clientId) {
       committed_points: hidden.filter((i) => i.state === 'committed').reduce((s, i) => s + i.points, 0),
       count: hidden.length,
     },
+    by_month: byMonth(db, clientId, { forClient: true, includePlanned: !!client.show_planned }),
+    planned: client.show_planned ? { points: b.forecast, available_after: b.available_after_planned } : null,
     support_hours: hours ? { purchased: hours.hours_purchased, used: hours.hours_used, remaining: hours.hours_remaining } : null,
   };
 }

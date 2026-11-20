@@ -446,9 +446,9 @@ async function importTrackerFromClickUp(db, { clientId, adapter, actor }) {
     const state = TRACKER_STATE[sig] || 'forecast';
     const date = (t.data.delivery_month || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
     const notes = [t.data.department, t.data.point_value != null && t.data.how_many != null ? `${t.data.point_value} pts x ${t.data.how_many}` : '', t.data.tracker_notes].filter(Boolean).join('; ');
-    return [q(`CU-${t.external_id}`), date, q(t.title.trim()), q(t.title.trim()), '', Math.round(t.data.points), state, q(t.external_id), q(notes)].join(',');
+    return [q(`CU-${t.external_id}`), date, q(t.title.trim()), q(t.title.trim()), '', Math.round(t.data.points), state, q(t.external_id), q(notes), q(t.data.department || '')].join(',');
   });
-  const csv = ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes', ...rows].join('\n');
+  const csv = ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes,category', ...rows].join('\n');
   const result = importer.importTracker(db, { clientId, csv, actor, filename: 'ClickUp tracker' });
   // Then a full sync, so each item links to its ClickUp task and later changes are picked up from here.
   const sync = await syncSource(db, { clientId, source: 'clickup', adapter, actor, full: true });

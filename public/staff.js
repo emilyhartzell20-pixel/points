@@ -18,7 +18,7 @@ const FLAG_TEXT = {
   points_from_tracker: 'Points from the ClickUp tracker',
   fractional_points: 'Fractional points rounded',
 };
-const ACTION_TEXT = { forecast: 'Planned (forecast)', approve: 'Approved → reserve points', complete: 'Completed → use points', cancel: 'Canceled → release points', change: 'Scope change', support_hours: 'Support hours (not points)' };
+const ACTION_TEXT = { forecast: 'Planned', approve: 'Approved → reserve points', complete: 'Completed → use points', cancel: 'Canceled → release points', change: 'Scope change', support_hours: 'Support hours (not points)' };
 const DEFAULT_STATE = { forecast: 'forecast', approve: 'committed', complete: 'used', cancel: 'canceled', change: '' };
 
 document.getElementById('logout').addEventListener('click', logout);
@@ -45,7 +45,7 @@ function openAddPoints(mode = 'work') {
     const st = h('select', { name: 'state' },
       h('option', { value: 'used' }, 'Completed – use points now'),
       h('option', { value: 'committed' }, 'Approved, not done yet – reserve points'),
-      h('option', { value: 'forecast' }, 'Planned only – forecast (no points move)'));
+      h('option', { value: 'forecast' }, 'Planned – no points move yet'));
     const exc = h('label', {}, 'Why this amount? (required for custom work or amounts outside the menu)', h('input', { name: 'exceptionReason', placeholder: 'e.g. Agreed 6 pts with Dana for a one-off training deck' }));
     const update = () => {
       const m = o.menu.items.find((i) => i.code === menuSel.value);
@@ -54,7 +54,7 @@ function openAddPoints(mode = 'work') {
       const outside = m ? (n < m.points_min || n > m.points_max) : true;
       exc.hidden = !outside;
       const s2 = st.value;
-      impact.textContent = s2 === 'forecast' ? `No change to the balance. Shown as forecast (${b.forecast + n} pts planned).`
+      impact.textContent = s2 === 'forecast' ? `No change to the balance. Planned becomes ${b.forecast + n} pts; available after planned ${b.available_after_planned - n}.`
         : `Available goes from ${b.available} to ${b.available - n}. ${s2 === 'used' ? `Used becomes ${b.used + n}.` : `Committed becomes ${b.committed + n}.`}`;
     };
     pts.addEventListener('input', () => { pts.dataset.auto = 'off'; update(); });
@@ -150,7 +150,8 @@ async function refresh() {
   const s = (label, v, cls) => h('div', { class: `stat ${cls || ''}` }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, String(v)));
   document.getElementById('balance').replaceChildren(
     s('Allocated', b.allocated), s('Used', b.used, 'used'), s('Committed', b.committed, 'committed'), s('Available', b.available, 'available'),
-    s('Forecast (not counted)', b.forecast, 'forecast'),
+    s('Planned (not counted)', b.forecast, 'forecast'),
+    s('Available after planned', b.available_after_planned, 'forecast'),
     ...(state.overview.support_hours ? [s('Support hours left', `${state.overview.support_hours.hours_remaining} / ${state.overview.support_hours.hours_purchased} h`, 'hours')] : []));
   await render();
 }
@@ -160,7 +161,7 @@ async function act(fn, okMsg) {
 }
 
 async function render() {
-  const fn = { clients: renderClients, team: renderTeam, menu: renderMenu, review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
+  const fn = { months: renderMonths, clients: renderClients, team: renderTeam, menu: renderMenu, review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
   panel.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
   try { panel.replaceChildren(await fn()); } catch (e) { panel.replaceChildren(h('p', { class: 'error' }, e.message)); }
 }
@@ -190,7 +191,7 @@ function suggestionCard(s, others) {
       ? h('label', {}, 'Hours', h('input', { name: 'hours', type: 'number', step: '0.25', min: '0', value: s.proposed_hours ?? '' }))
       : h('div', { class: 'row' },
         h('label', {}, 'Result', h('select', { name: 'state' }, ['forecast', 'committed', 'used', 'canceled'].map((st) =>
-          h('option', { value: st, selected: DEFAULT_STATE[s.action] === st }, { forecast: 'Forecast only', committed: 'Committed (reserve)', used: 'Used (completed & confirmed)', canceled: 'Canceled (release)' }[st])))),
+          h('option', { value: st, selected: DEFAULT_STATE[s.action] === st }, { forecast: 'Planned (not counted)', committed: 'Committed (reserve)', used: 'Used (completed & confirmed)', canceled: 'Canceled (release)' }[st])))),
         s.work_item_id ? null : h('label', {}, 'Menu item', menuSelect(s.menu_item_code)),
         h('label', {}, s.work_item_id ? 'Points (from the existing ledger entry)' : `Points (menu ${range})`, h('input', { name: 'points', type: 'number', min: '0', step: '1', value: s.proposed_points ?? '', placeholder: 'confirm' }))),
     h('label', {}, 'Client-facing summary (plain language)', h('textarea', { name: 'clientSummary', rows: '2', placeholder: 'e.g. Built the new partner landing page and sign-up form' })),
@@ -249,6 +250,27 @@ async function renderReview() {
   return out;
 }
 
+// ------------------------------------------------------------------ by month
+async function renderMonths() {
+  const data = await api(`/api/staff/clients/${state.clientId}/by-month`);
+  const b = state.overview.balance;
+  const jump = (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+  return h('div', {},
+    h('section', { class: 'card' },
+      h('div', { class: 'toolbar' }, h('h2', {}, 'Points by ', h('em', {}, 'month')),
+        h('span', { class: 'muted small' }, `${b.used} used · ${b.committed} committed · ${b.forecast} planned of ${b.allocated}`)),
+      monthChart(data.months, { showPlanned: true, onPick: jump })),
+    h('section', { class: 'card' },
+      h('div', { class: 'toolbar' }, h('h2', {}, 'Work, ', h('em', {}, 'month by month')),
+        h('div', { class: 'actions' },
+          h('button', { type: 'button', onclick: () => document.querySelectorAll('details.month').forEach((d) => { d.open = true; }) }, 'Expand all'),
+          h('button', { type: 'button', onclick: () => document.querySelectorAll('details.month').forEach((d) => { d.open = false; }) }, 'Collapse all'))),
+      h('p', { class: 'muted small' }, 'Colors show the type of work (from the ClickUp Department, or the menu category). Click a type to filter. Click a bar to jump to its month.'),
+      monthList(data, { showPlanned: true, renderItem: (it) => h('div', {}, h('div', { class: 'work-desc' }, it.title),
+        it.client_summary && it.client_summary !== it.title ? h('div', { class: 'muted small' }, `Client sees: ${it.client_summary}${it.summary_approved ? '' : ' (not approved)'}`)
+          : !it.summary_approved ? h('div', { class: 'muted small' }, 'No client summary yet') : null) })));
+}
+
 // ------------------------------------------------------------------ ledger
 async function renderLedger() {
   const [items, events] = await Promise.all([api(`/api/staff/clients/${state.clientId}/work-items`), api(`/api/staff/clients/${state.clientId}/ledger`)]);
@@ -272,7 +294,7 @@ async function renderLedger() {
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['Date', 'Work', 'State', 'Points', 'Menu', 'Origin', 'Client summary', 'Evidence', ''].map((t) => h('th', {}, t)))),
         h('tbody', {}, items.map((w) => h('tr', { class: `state-${w.state}` },
-          h('td', {}, fmtDate(w.work_date)), h('td', {}, w.title), h('td', {}, h('span', { class: `badge st-${w.state}` }, w.state)),
+          h('td', {}, fmtDate(w.work_date)), h('td', {}, w.title), h('td', {}, h('span', { class: `badge st-${w.state}` }, w.state === 'forecast' ? 'planned' : w.state)),
           h('td', { class: 'num' }, String(w.points)), h('td', {}, w.menu_item_code || '—'), h('td', {}, w.origin),
           h('td', {}, w.client_summary ? `${w.client_summary}${w.summary_approved ? ' ✓' : ' (not approved)'}` : '—'),
           h('td', {}, w.evidence.map((e) => (e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer', class: 'ev-link' }, e.source_type === 'clickup_task' ? 'ClickUp' : 'Email') : null))),
@@ -497,6 +519,11 @@ async function renderPreview() {
         if (!confirm(c.portal_enabled ? 'Turn off access and sign out everyone at this client?' : 'Turn on access? Everyone with a login at this client will be able to see the dashboard below.')) return;
         act(() => api(`/api/staff/clients/${state.clientId}/portal`, { enabled: !c.portal_enabled }), c.portal_enabled ? 'Access turned off' : 'Access turned on');
       } }, c.portal_enabled ? 'Turn off access' : 'Turn on access')),
+    h('section', { class: 'card access' },
+      h('div', {}, h('strong', {}, c.show_planned ? 'Planned work is shown to the client' : 'Planned work is hidden from the client'),
+        h('p', { class: 'muted small' }, 'Planned items appear in the month-by-month view (striped) with a note on what remains if all planned work goes ahead. They never change the four balance numbers.')),
+      h('button', { onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/show-planned`, { enabled: !c.show_planned }), c.show_planned ? 'Planned work hidden' : 'Planned work shown') },
+        c.show_planned ? 'Hide planned work' : 'Show planned work')),
     logins,
     h('h2', { class: 'preview-title' }, 'What the client sees'),
     h('div', { class: 'preview-frame' }, renderClientView(v)));
