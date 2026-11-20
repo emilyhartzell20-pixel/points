@@ -69,3 +69,19 @@ test('quick links: staff add them, only that client sees them, without internal 
   assert.equal((await staff.post(`/api/staff/clients/${s.hp}/links/${b.id}/remove`, {})).status, 200);
   assert.equal(JSON.parse((await dana.get('/api/client/dashboard')).text).links.length, 1);
 });
+
+test('invite links use the app address the admin is on (works before the custom domain is live)', async (t) => {
+  const saved = { p: process.env.PUBLIC_URL, r: process.env.RENDER_EXTERNAL_URL };
+  t.after(() => { for (const [k, v] of [['PUBLIC_URL', saved.p], ['RENDER_EXTERNAL_URL', saved.r]]) { if (v == null) delete process.env[k]; else process.env[k] = v; } });
+  const s = await seeded({ sync: false });
+  const srv = await startServer(createApp({ db: s.db, adapters: {} }));
+  t.after(srv.close);
+  process.env.PUBLIC_URL = 'https://points.leadg2.com';
+  process.env.RENDER_EXTERNAL_URL = srv.base;
+  const staff = client(srv.base); await staff.login(DEMO_STAFF.email, DEMO_STAFF.password);
+  const r = JSON.parse((await staff.post(`/api/staff/clients/${s.hp}/users`, { name: 'New Person', email: 'new@harborpoint.example' })).text);
+  assert.ok(r.link.startsWith(`${srv.base}/setup#t=`), r.link);
+  delete process.env.RENDER_EXTERNAL_URL;
+  const r2 = JSON.parse((await staff.post(`/api/staff/clients/${s.hp}/users`, { name: 'Other Person', email: 'other@harborpoint.example' })).text);
+  assert.ok(r2.link.startsWith('https://points.leadg2.com/setup#t='), 'an unknown address never ends up in a link');
+});

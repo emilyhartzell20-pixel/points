@@ -244,9 +244,14 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
   });
 
   // ---- client logins (invite links: the client chooses their own password)
+  // Links use the address the staff member is on, when it's one of this app's own addresses (PUBLIC_URL or
+  // Render's onrender.com address). So a link made before the custom domain's DNS works still opens.
   const inviteLink = (req, token) => {
-    const base = process.env.PUBLIC_URL || `${secureCookies ? 'https' : 'http'}://${req.headers.host}`;
-    return `${base.replace(/\/$/, '')}/setup#t=${token}`; // fragment: never sent to servers or logs
+    const own = [process.env.PUBLIC_URL, process.env.RENDER_EXTERNAL_URL].filter(Boolean).map((u) => u.replace(/\/$/, ''));
+    const host = String(req.headers.host || '').toLowerCase();
+    const base = own.find((u) => { try { return new URL(u).host.toLowerCase() === host; } catch { return false; } })
+      || own[0] || `${secureCookies ? 'https' : 'http'}://${req.headers.host}`;
+    return `${base}/setup#t=${token}`; // fragment: never sent to servers or logs
   };
   route('GET', '/api/staff/clients/:id/users', 'staff', ({ res, p }) => send(res, 200, admin.listClientUsers(db, clientExists(int(p.id)))));
   route('POST', '/api/staff/clients/:id/users', 'staff', async ({ req, res, p, user }) => {
