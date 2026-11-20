@@ -23,6 +23,13 @@ Render deploys from a GitHub repository.
 ## Step 2: Create the app on Render
 
 1. Sign in to Render, click **New +** and choose **Blueprint**.
+   > ⚠️ Don't choose **Static Site**. This app runs a server with a database, so it must be a **Web Service**. If you see "Empty build command" or "Publish directory … does not exist", the service was created as a static site: delete it and start again with **Blueprint**.
+   >
+   > If you can't use Blueprint, choose **New + → Web Service** and set:
+   > - **Runtime:** Docker, **Instance type:** Starter
+   > - **Health check path:** `/healthz`
+   > - **Disk:** mount path `/data`, 1 GB
+   > - **Environment variables:** `PUBLIC_URL=https://points.leadg2.com`, `TRUST_PROXY=1`, `BACKUP_DAILY=1`, `ADMIN_EMAIL`, `ADMIN_NAME`
 2. Connect your GitHub account when asked, then pick the `leadg2-points` repository. Render reads the included `render.yaml`, which already sets up:
    - a web service called **leadg2-points** with a 1 GB disk for the database
    - health checks
