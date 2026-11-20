@@ -310,3 +310,23 @@ button.type-chip { cursor: pointer; }
 .outlook-table tr.earlier td { color: var(--muted); font-style: italic; }
 .outlook-table td.remaining { font-family: var(--font-head); font-weight: 800; }
 .outlook-table tr:last-child td { border-bottom: none; }
+.waiting.has-items { border-left: 3px solid var(--accent); }
+.waiting-list { list-style: none; margin: 0; padding: 0; }
+.waiting-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.waiting-list li:first-child { border-top: none; }
+.btn-link { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700; padding: 8px 14px; border-radius: var(--radius-sm); white-space: nowrap; }
+.btn-link:hover { background: var(--lg-orange-dark); }
+.cal-month h3 { margin: 16px 0 6px; font-size: .95rem; color: var(--muted); }
+.cal-list { list-style: none; margin: 0; padding: 0; }
+.cal-item { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.cal-date { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--panel); border-radius: var(--radius-sm); padding: 4px 0; line-height: 1.1; }
+.cal-dow { font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+.cal-day { font-family: var(--font-head); font-weight: 800; font-size: 1.2rem; }
+.cal-title { font-weight: 700; }
+.cal-item.published .cal-title { color: var(--muted); }
+.cal-stage { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.cal-stage.published { background: var(--stage-used); color: #fff; border-color: var(--stage-used); }
+.cal-stage.in_review { background: var(--warn-bg); color: var(--lg-orange-dark); border-color: var(--warn-line); }
+.cal-stage.in_progress { color: var(--stage-committed); border-color: var(--stage-committed); }
+.cal-stage.planned { color: var(--muted); }
+@media (max-width: 760px) { .cal-item { grid-template-columns: 46px 1fr; } .cal-stage { grid-column: 2; justify-self: start; } .waiting-list li { flex-direction: column; align-items: flex-start; } }

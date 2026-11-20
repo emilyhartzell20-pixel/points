@@ -207,6 +207,29 @@ CREATE TABLE IF NOT EXISTS work_item_evidence (
   PRIMARY KEY (work_item_id, source_record_id)
 );
 
+-- Client-facing ClickUp lists shown on the dashboard (not points): an editorial calendar and the
+-- collaboration list where work waits for the client's review. Snapshots are refreshed by sync.
+CREATE TABLE IF NOT EXISTS client_feeds (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('calendar','collaboration')),
+  list_id TEXT NOT NULL,
+  label TEXT,
+  refreshed_at TEXT,
+  last_error TEXT,
+  UNIQUE (kind, list_id)
+);
+CREATE TABLE IF NOT EXISTS feed_items (
+  feed_id INTEGER NOT NULL REFERENCES client_feeds(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT,
+  status_type TEXT,
+  due_date TEXT,
+  url TEXT,
+  PRIMARY KEY (feed_id, task_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
   client_id INTEGER,

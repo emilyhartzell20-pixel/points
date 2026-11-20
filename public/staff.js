@@ -377,12 +377,46 @@ function renderSources() {
   };
   return h('div', {},
     h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('outlook', 'Outlook'), box('tracker', 'Tracker import')),
+    renderFeedsCard(o),
     renderHubSpotCard(o),
     h('section', { class: 'card' }, h('h2', {}, 'Contract & allocation (source of truth)'),
       h('p', {}, `${o.contract.agreement_ref} · term ${fmtDate(o.contract.term_start)} – ${fmtDate(o.contract.term_end)} · menu ${o.menu.version.code}`),
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
       h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${a.points} pts — ${a.source_ref} (verified by ${a.verified_by})`)))),
     renderMappings(o));
+}
+
+function renderFeedsCard(o) {
+  const KIND = { calendar: 'Editorial calendar', collaboration: 'Waiting on you (client approvals)' };
+  const live = o.connector_mode.clickup === 'live';
+  const kind = h('select', {}, h('option', { value: 'calendar' }, KIND.calendar), h('option', { value: 'collaboration' }, KIND.collaboration));
+  const list = h('input', { placeholder: 'Paste the ClickUp list URL or ID' });
+  const picker = h('div', { class: 'actions' });
+  if (live) picker.append(h('button', { type: 'button', class: 'secondary', onclick: async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Loading ClickUp…';
+    try {
+      const tree = await api('/api/staff/clickup/browse');
+      const sel = h('select', { 'aria-label': 'ClickUp list' }, h('option', { value: '' }, '— choose a list —'),
+        tree.map((t) => h('optgroup', { label: `${t.workspace} · ${t.space.name}` }, t.lists.map((l) => h('option', { value: l.id }, `${l.folder ? `${l.folder} › ` : ''}${l.name}`)))));
+      sel.addEventListener('change', () => { list.value = sel.value; });
+      picker.replaceChildren(h('label', {}, 'Pick from ClickUp', sel));
+    } catch (ex) { toast(ex.message, 'error'); e.target.disabled = false; e.target.textContent = 'Browse ClickUp'; }
+  } }, 'Browse ClickUp'));
+  return h('section', { class: 'card' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Shown on the client dashboard'),
+      live && o.feeds.length ? h('button', { onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/feeds/refresh`, {}), 'Refreshed from ClickUp') }, 'Refresh now') : null),
+    h('p', { class: 'muted small' }, 'Client-facing ClickUp lists (not points): an editorial calendar, and the collaboration list where items marked "ready for review" appear as "Waiting on you". Only titles, dates and stages are shown, never descriptions or comments. Refreshed every 30 minutes.'),
+    o.feeds.length ? h('table', {}, h('tbody', {}, o.feeds.map((f) => h('tr', {},
+      h('td', {}, h('strong', {}, KIND[f.kind])), h('td', { class: 'small' }, `List ${f.list_id}${f.label ? ` · ${f.label}` : ''}`),
+      h('td', { class: 'small' }, f.last_error ? h('span', { class: 'error' }, f.last_error) : `${f.items} items · updated ${fmtDateTime(f.refreshed_at)}`),
+      h('td', { class: 'row-actions' }, h('button', { class: 'danger', onclick: () => {
+        if (!confirm(`Stop showing this ${KIND[f.kind].toLowerCase()} to the client?`)) return;
+        act(() => api(`/api/staff/clients/${state.clientId}/feeds/${f.id}/remove`, {}), 'Removed');
+      } }, 'Remove'))))))
+      : h('p', { class: 'muted small' }, 'Nothing linked yet.'),
+    h('h3', {}, 'Add a list'), picker,
+    h('div', { class: 'row' }, h('label', {}, 'Show as', kind), h('label', {}, 'ClickUp list', list),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/feeds`, { kind: kind.value, listId: list.value }), 'Added') }, 'Add'))));
 }
 
 function renderHubSpotCard(o) {
@@ -630,11 +664,15 @@ function renderFinder() {
         const name = h('input', { value: f.client_name, 'aria-label': 'Client name', disabled: f.status === 'linked' });
         const alloc = h('input', { type: 'number', min: '0', step: '1', value: f.allocation ?? '', placeholder: '?', class: 'pts-in', 'aria-label': 'Points allocated', disabled: f.status === 'linked' });
         const ts = h('input', { type: 'date', 'aria-label': 'Term starts', disabled: f.status !== 'new' }); const te = h('input', { type: 'date', 'aria-label': 'Term ends', disabled: f.status !== 'new' });
-        return { f, pick, name, alloc, ts, te };
+        const cal = f.calendar && !f.calendar.linked ? h('input', { type: 'checkbox', checked: true, 'aria-label': `Show ${f.calendar.name}` }) : null;
+        const col = f.collaboration && !f.collaboration.linked ? h('input', { type: 'checkbox', checked: true, 'aria-label': `Show ${f.collaboration.name}` }) : null;
+        if ((cal || col) && f.status === 'linked') pick.checked = true;
+        return { f, pick, name, alloc, ts, te, cal, col };
       });
       const go = h('button', { class: 'primary', onclick: async () => {
         const items = rows.filter((r) => r.pick.checked).map((r) => ({ listId: r.f.list_id, listName: r.f.list_name, name: r.name.value,
-          allocation: r.alloc.value === '' ? null : Number(r.alloc.value), termStart: r.ts.value || null, termEnd: r.te.value || null }));
+          allocation: r.f.status === 'linked' || r.alloc.value === '' ? null : Number(r.alloc.value), termStart: r.ts.value || null, termEnd: r.te.value || null,
+          calendarListId: r.cal && r.cal.checked ? r.f.calendar.id : null, collabListId: r.col && r.col.checked ? r.f.collaboration.id : null }));
         if (!items.length) return toast('Tick at least one tracker', 'error');
         if (!confirm(`Set up ${items.length} client(s) from ClickUp? Each tracker is read and loaded (Completed = used, In Progress = committed, the rest = planned). Safe to run again.`)) return;
         go.disabled = true; go.textContent = `Importing ${items.length}… (about 5–20 seconds each)`;
@@ -643,7 +681,7 @@ function renderFinder() {
           box.replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, ['Client', 'Result', 'Allocated', 'Used', 'Committed', 'Planned', 'Available'].map((t) => h('th', {}, t)))),
             h('tbody', {}, results.map((r) => h('tr', {}, h('td', {}, h('strong', {}, r.name || r.listId)),
               h('td', { class: 'small' }, r.error ? h('span', { class: 'error' }, r.error)
-                : `${r.created ? 'Created' : 'Updated'} · ${r.found} items found, ${r.added} added${r.term ? ` · term ${fmtDate(r.term.term_start)} – ${fmtDate(r.term.term_end)} (from ${r.term.from})` : ''}${r.warning ? ` · ⚠ ${r.warning}` : ''}`),
+                : `${r.created ? 'Created' : 'Updated'} · ${r.found} items found, ${r.added} added${r.term ? ` · term ${fmtDate(r.term.term_start)} – ${fmtDate(r.term.term_end)} (from ${r.term.from})` : ''}${r.linked_feeds && r.linked_feeds.length ? ` · now showing ${r.linked_feeds.map((k) => (k === 'calendar' ? 'editorial calendar' : 'approvals')).join(' + ')}` : ''}${r.warning ? ` · ⚠ ${r.warning}` : ''}`),
               ...(r.balance ? [r.balance.allocated, r.balance.used, r.balance.committed, r.balance.forecast, r.balance.available].map((n) => h('td', { class: 'num' }, String(n))) : [h('td', { colspan: 5 })]))))),
             h('p', { class: 'muted small' }, 'Check each new client\'s contract term and agreement reference under Edit, then add their logins on Client access.'));
           await loadClients();
@@ -653,8 +691,12 @@ function renderFinder() {
       box.replaceChildren(
         h('p', { class: 'muted small' }, `Found ${found.length} tracker list(s). Points come from the list name; leave the term blank to work it out from the tracker's month headings. Two trackers with the same client name become one client, and the second tracker's points are added to its allocation; rename one row to keep them separate.`),
         h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
-          h('thead', {}, h('tr', {}, ['', 'Client', 'ClickUp tracker', 'Points', 'Term starts', 'Term ends', 'Status'].map((t) => h('th', {}, t)))),
+          h('thead', {}, h('tr', {}, ['', 'Client', 'ClickUp tracker', 'Also show the client', 'Points', 'Term starts', 'Term ends', 'Status'].map((t) => h('th', {}, t)))),
           h('tbody', {}, rows.map((r) => h('tr', {}, h('td', {}, r.pick), h('td', {}, r.name), h('td', { class: 'small' }, r.f.list_name),
+            h('td', { class: 'small' },
+              r.f.calendar ? h('label', { class: 'check' }, r.cal || '✓', ` Calendar: ${r.f.calendar.name}`) : null,
+              r.f.collaboration ? h('label', { class: 'check' }, r.col || '✓', ` Approvals: ${r.f.collaboration.name}`) : null,
+              !r.f.calendar && !r.f.collaboration ? h('span', { class: 'muted' }, '—') : null),
             h('td', {}, r.alloc), h('td', {}, r.ts), h('td', {}, r.te),
             h('td', {}, h('span', { class: `status ${r.f.status === 'linked' ? 'active' : 'invited'}` }, r.f.status === 'linked' ? `Linked to ${r.f.linked_to}` : STATUS[r.f.status]))))))),
         h('div', { class: 'actions' }, go));

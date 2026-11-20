@@ -61,6 +61,7 @@ function renderClientView(v) {
       h('p', { class: 'eyebrow' }, v.client.name),
       h('h1', {}, 'Your service points, ', h('em', {}, 'at a glance.')),
       h('p', { class: 'lede' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Balance last updated ${fmtDateTime(v.last_updated)}`)),
+    renderWaiting(v.content),
     h('section', { class: 'stats', 'aria-label': 'Point balance' },
       stat('Total allocated', v.balance.allocated, '', allocNote),
       stat('Used', v.balance.used, 'used', 'Completed work'),
@@ -69,6 +70,7 @@ function renderClientView(v) {
     showPlanned ? h('p', { class: 'planned-note' }, h('span', { class: 'tip-key seg-planned' }),
       `${v.planned.points} more points are planned. If all planned work goes ahead, ${v.planned.available_after} points remain.`) : null,
     months ? renderOutlook(months.look_ahead, { showPlanned, forClient: true }) : null,
+    renderCalendar(v.content),
     months ? h('section', { class: 'card' }, h('h2', {}, 'Points by ', h('em', {}, 'month')), monthChart(months.months, {
       showPlanned, onPick: (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } })) : null,
     months ? h('section', { class: 'card' }, h('h2', {}, 'Your work, ', h('em', {}, 'month by month')),
@@ -206,4 +208,36 @@ function renderOutlook(o, { showPlanned = true, forClient = false } = {}) {
         h('th', { class: 'num' }, forClient ? 'Points left after' : 'Remaining after'))),
       h('tbody', {}, rows))),
     h('p', { class: 'muted small' }, 'Approved points are already reserved, so they’re included in today’s available number. Planned points come off as each month goes ahead.'));
+}
+
+// ------------------------------------------------------------------ client content: waiting on you + editorial calendar
+const CAL_STAGE = { published: 'Published', in_review: 'In review', in_progress: 'In progress', planned: 'Planned' };
+function renderWaiting(c) {
+  if (!c || !c.waiting) return null;
+  const n = c.waiting.length;
+  return h('section', { class: `card waiting${n ? ' has-items' : ''}` },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Waiting ', h('em', {}, 'on you')), h('span', { class: 'muted small' }, n ? `${n} item${n === 1 ? '' : 's'} ready for your review` : 'Nothing needs you right now')),
+    n ? h('ul', { class: 'waiting-list' }, c.waiting.map((w) => h('li', {},
+      h('div', {}, h('div', { class: 'work-desc' }, w.title), h('div', { class: 'work-meta' }, w.due ? `Due ${fmtDate(w.due)}` : 'No due date')),
+      w.url ? h('a', { class: 'btn-link', href: w.url, target: '_blank', rel: 'noopener noreferrer' }, 'Review →') : null)))
+      : h('p', { class: 'muted small' }, 'When we send something for your review or approval, it will appear here.'));
+}
+function renderCalendar(c) {
+  if (!c || !c.calendar) return null;
+  const byMonth = {};
+  for (const i of c.calendar) (byMonth[i.date.slice(0, 7)] = byMonth[i.date.slice(0, 7)] || []).push(i);
+  const keys = Object.keys(byMonth).sort();
+  const label = (k) => new Date(`${k}-15T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return h('section', { class: 'card' },
+    h('h2', {}, 'Editorial ', h('em', {}, 'calendar')),
+    keys.length ? keys.map((k) => h('div', { class: 'cal-month' }, h('h3', {}, label(k)),
+      h('ul', { class: 'cal-list' }, byMonth[k].map((i) => {
+        const d = new Date(`${i.date}T12:00:00Z`);
+        return h('li', { class: `cal-item ${i.stage}` },
+          h('div', { class: 'cal-date' }, h('span', { class: 'cal-dow' }, d.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })), h('span', { class: 'cal-day' }, String(d.getUTCDate()))),
+          h('div', { class: 'cal-title' }, i.title),
+          h('span', { class: `cal-stage ${i.stage}` }, CAL_STAGE[i.stage]));
+      }))))
+      : h('p', { class: 'muted small' }, 'No scheduled content yet.'),
+    c.refreshed_at ? h('p', { class: 'muted small' }, `Updated ${fmtDateTime(c.refreshed_at)}`) : null);
 }

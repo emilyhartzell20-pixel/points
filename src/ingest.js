@@ -549,14 +549,20 @@ async function findTrackers(db, adapter) {
   const mapped = db.prepare(`SELECT m.value, c.id AS client_id, c.name FROM source_mappings m JOIN clients c ON c.id = m.client_id WHERE m.source_type = 'clickup_list'`).all();
   const byList = Object.fromEntries(mapped.map((r) => [r.value, r]));
   const out = [];
+  const feedTaken = new Set(db.prepare('SELECT list_id FROM client_feeds').all().map((r) => r.list_id));
   for (const sp of tree) {
+    const pickList = (re) => sp.lists.find((x) => re.test(x.name) && !TEMPLATE_NAME.test(x.name) && !/template/i.test(x.name));
+    const cal = pickList(/(blog|editorial|content)\s+calendar/i);
+    const collab = pickList(/\bcollaboration\b/i);
     for (const l of sp.lists) {
       if (!TRACKER_NAME.test(l.name) || TEMPLATE_NAME.test(l.name) || /template/i.test(sp.space.name)) continue;
       const existing = byList[l.id];
       const sameName = db.prepare('SELECT id, name FROM clients WHERE lower(name) = lower(?)').get(sp.space.name);
       out.push({ list_id: l.id, list_name: l.name.trim(), space: sp.space.name, folder: l.folder, client_name: sp.space.name,
         allocation: parseAllocation(l.name), status: existing ? 'linked' : sameName ? 'client_exists' : 'new',
-        client_id: existing ? existing.client_id : sameName ? sameName.id : null, linked_to: existing ? existing.name : null });
+        client_id: existing ? existing.client_id : sameName ? sameName.id : null, linked_to: existing ? existing.name : null,
+        calendar: cal ? { id: cal.id, name: cal.name.trim(), linked: feedTaken.has(cal.id) } : null,
+        collaboration: collab ? { id: collab.id, name: collab.name.trim(), linked: feedTaken.has(collab.id) } : null });
     }
   }
   return out.sort((a, z) => a.client_name.localeCompare(z.client_name));
@@ -617,10 +623,17 @@ async function importTrackers(db, { items, adapter, actor }) {
         }
         admin.addMapping(db, { clientId, sourceType: 'clickup_list', value: listId, scope: 'points', label: it.listName || null, actor });
       }
+      const feedsMod = require('./feeds');
+      const linkedFeeds = [];
+      for (const [kind, lid] of [['calendar', it.calendarListId], ['collaboration', it.collabListId]]) {
+        if (!lid || db.prepare('SELECT 1 FROM client_feeds WHERE kind = ? AND list_id = ?').get(kind, String(lid))) continue;
+        feedsMod.addFeed(db, { clientId, kind, listId: String(lid), actor }); linkedFeeds.push(kind);
+      }
+      if (linkedFeeds.length) await feedsMod.refreshFeeds(db, adapter, { clientId });
       const r = await importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmpty: true });
       const b = activeContract(db, clientId) && require('./ledger').balance(db, clientId);
       results.push({ listId, clientId, name: db.prepare('SELECT name FROM clients WHERE id = ?').get(clientId).name, created, term,
-        found: r.found, added: r.created, skipped: r.skipped, balance: b, warning: created && !(Number(it.allocation) > 0) ? 'No allocation in the list name: set it with + Add points → Add to allocation' : null });
+        found: r.found, added: r.created, skipped: r.skipped, balance: b, linked_feeds: linkedFeeds, warning: created && !(Number(it.allocation) > 0) ? 'No allocation in the list name: set it with + Add points → Add to allocation' : null });
     } catch (e) {
       results.push({ listId: it.listId, name: it.name, error: e.message });
     }

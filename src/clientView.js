@@ -4,6 +4,7 @@
 // clients' data cannot leak. Staff "preview" calls this exact function.
 const ledger = require('./ledger');
 const { byMonth } = require('./months');
+const { clientFeeds } = require('./feeds');
 
 function clientDashboard(db, clientId) {
   const client = db.prepare('SELECT id, name, show_planned FROM clients WHERE id = ?').get(clientId);
@@ -29,6 +30,7 @@ function clientDashboard(db, clientId) {
       committed_points: hidden.filter((i) => i.state === 'committed').reduce((s, i) => s + i.points, 0),
       count: hidden.length,
     },
+    content: clientFeeds(db, clientId),
     by_month: byMonth(db, clientId, { forClient: true, includePlanned: !!client.show_planned }),
     planned: client.show_planned ? { points: b.forecast, available_after: b.available_after_planned } : null,
     support_hours: hours ? { purchased: hours.hours_purchased, used: hours.hours_used, remaining: hours.hours_remaining } : null,
