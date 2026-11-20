@@ -356,3 +356,5 @@ button.type-chip { cursor: pointer; }
 .ql-arrow { margin-left: auto; color: var(--accent); font-weight: 700; }
 .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 4px; }
 .presets button { padding: 4px 10px; font-size: 13px; }
+.client-view .section-title { margin: 8px 0 10px; font-size: 22px; }
+.client-view .section-title em { font-family: 'Lora', Georgia, serif; font-style: italic; font-weight: 500; color: var(--accent); }
