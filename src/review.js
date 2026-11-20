@@ -80,8 +80,11 @@ function approveSuggestion(db, p) {
       } else {
         if (state === 'canceled') throw new AppError(400, 'Nothing has been booked for this work yet; dismiss the suggestion instead');
         const code = p.menuItemCode || s.menu_item_code;
-        if (!code) throw new AppError(400, 'Choose the service menu item');
-        const menuItem = requireItem(db, s.client_id, code);
+        const fromTracker = JSON.parse(s.flags).includes('points_from_tracker');
+        if (!code && !fromTracker) throw new AppError(400, 'Choose the service menu item');
+        // Points-tracker items may not map to a menu item: the tracker's Total Points is the agreed amount.
+        const menuItem = code ? requireItem(db, s.client_id, code)
+          : { code: null, name: 'From ClickUp points tracker', menu_version_id: undefined, points_min: 0, points_max: Number.MAX_SAFE_INTEGER };
         if (points == null || !Number.isInteger(points)) throw new AppError(400, `Confirm the point amount (menu: ${menuItem.points_min === menuItem.points_max ? menuItem.points_min : `${menuItem.points_min}–${menuItem.points_max}`})`);
         if ((points < menuItem.points_min || points > menuItem.points_max) && !p.reason) {
           throw new AppError(400, `Amount ${points} is outside the menu (${menuItem.points_min}–${menuItem.points_max}); give a reason for the exception`);

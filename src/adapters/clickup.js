@@ -28,15 +28,21 @@ function customField(task, name) {
 function normalizeTask(task) {
   const tags = (task.tags || []).map((t) => String(t.name || t).toLowerCase());
   const menuTag = tags.find((t) => t.startsWith('menu:'));
-  const pointsField = customField(task, 'Points');
+  // Points trackers (like "2026 Service Point Tracking") keep the real numbers in custom fields:
+  // Total Points (= Point Value x How Many) and a "Service Point Status" dropdown.
+  const totalField = customField(task, 'Total Points');
+  const pointsField = totalField != null ? totalField : customField(task, 'Points');
   const hoursField = customField(task, 'Hours');
+  const trackerStatus = customField(task, 'Service Point Status');
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  const points = num(pointsField);
   return {
     source_type: 'clickup_task',
     external_id: String(task.id),
     occurred_at: msToIso(task.date_updated || task.date_created),
     url: task.url || `https://app.clickup.com/t/${task.id}`,
     title: task.name,
-    status: task.status && (task.status.status || task.status),
+    status: trackerStatus || (task.status && (task.status.status || task.status)),
     author: task.creator && (task.creator.email || task.creator.username) || null,
     body: task.text_content || task.description || '',
     thread_id: task.parent || null,
@@ -44,11 +50,19 @@ function normalizeTask(task) {
       list_id: task.list && String(task.list.id),
       list_name: task.list && task.list.name,
       space_id: task.space && String(task.space.id),
-      parent_id: task.parent || null,
+      // A task with its own points is its own deliverable, even when it sits under a month heading.
+      parent_id: points != null ? null : (task.parent || null),
+      raw_parent: task.parent || null,
       tags,
       menu_code: customField(task, 'Service Menu Item') || (menuTag ? menuTag.slice(5).toUpperCase() : null),
-      points: pointsField == null ? null : Number(pointsField),
-      hours: hoursField == null ? null : Number(hoursField),
+      points,
+      from_tracker: trackerStatus != null || totalField != null,
+      point_value: num(customField(task, 'Point Value')),
+      how_many: num(customField(task, 'How Many')),
+      delivery_month: msToIso(customField(task, '📆 Delivery Month') || customField(task, 'Delivery Month')),
+      department: customField(task, 'Department'),
+      tracker_notes: customField(task, 'Notes'),
+      hours: num(hoursField),
       date_created: msToIso(task.date_created),
       date_closed: msToIso(task.date_closed || task.date_done),
     },

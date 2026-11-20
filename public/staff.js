@@ -15,6 +15,8 @@ const FLAG_TEXT = {
   menu_item_not_on_client_menu: 'Menu item not on this client\'s menu',
   hours_unclear: 'Hours unclear',
   not_yet_completed: 'Not yet completed',
+  points_from_tracker: 'Points from the ClickUp tracker',
+  fractional_points: 'Fractional points rounded',
 };
 const ACTION_TEXT = { forecast: 'Planned (forecast)', approve: 'Approved → reserve points', complete: 'Completed → use points', cancel: 'Canceled → release points', change: 'Scope change', support_hours: 'Support hours (not points)' };
 const DEFAULT_STATE = { forecast: 'forecast', approve: 'committed', complete: 'used', cancel: 'canceled', change: '' };
@@ -419,7 +421,8 @@ function renderMappings(o) {
         : 'ClickUp is not connected yet. Follow the three steps in the ClickUp box above.'),
       h('ol', { class: 'small' },
         h('li', {}, 'Every hour (or when you click "Sync ClickUp now"), the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads; it can never change a task.'),
-        h('li', {}, 'For each task it notes the status (to do, in progress, complete, canceled), plus these optional task fields: a "Service Menu Item" custom field or a tag like menu:LP-BUILD, a "Points" custom field, and an "Hours" field for support work. Subtasks roll up into their parent task.'),
+        h('li', {}, 'Points-tracker lists (like "2026 Service Point Tracking") are read directly: "Service Point Status" gives the stage (Planned = forecast, In Progress = committed, Completed = used) and "Total Points" gives the amount. Month headings are ignored.'),
+        h('li', {}, 'Other lists: it uses the task status, plus an optional "Service Menu Item" field or a menu:CODE tag. Subtasks without their own points roll up into their parent.'),
         h('li', {}, 'Emails that contain the task link (app.clickup.com/t/…) or its ID (CU-…) are grouped with that task, so one deliverable becomes one suggestion.'),
         h('li', {}, 'It turns what it found into suggestions in the Review queue. Nothing changes the balance until a consultant approves.'))));
 }

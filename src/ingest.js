@@ -120,7 +120,7 @@ function clickupSignal(status) {
   if (/cancel/.test(s)) return 'canceled';
   if (/^(complete|completed|closed|done|delivered)$/.test(s)) return 'completed';
   if (/approved/.test(s)) return 'approved';
-  if (/(progress|review|scheduled|active|working)/.test(s)) return 'in_progress';
+  if (/(progress|review|scheduled|active|working|ongoing|drafting|revisions|with design)/.test(s)) return 'in_progress';
   return 'requested';
 }
 
@@ -136,7 +136,12 @@ function emailSignals(text) {
 }
 
 function recordSignals(db, clientId, r) {
-  if (r.source_type === 'clickup_task') return { signals: [clickupSignal(r.status)], fromClient: false };
+  if (r.source_type === 'clickup_task') {
+    const sig = clickupSignal(r.status);
+    // In a points tracker, "In Progress" / "Client Review" means the work was agreed and is underway.
+    if (sig === 'in_progress' && JSON.parse(r.data).from_tracker) return { signals: ['approved'], fromClient: false, tracker: true };
+    return { signals: [sig], fromClient: false, tracker: JSON.parse(r.data).from_tracker };
+  }
   const clientDomains = mappingsFor(db, clientId).filter((m) => m.source_type === 'email_domain').map((m) => m.value.toLowerCase());
   const clientAddrs = mappingsFor(db, clientId).filter((m) => m.source_type === 'email_address').map((m) => m.value.toLowerCase());
   const from = (r.author || '').toLowerCase();
@@ -158,6 +163,12 @@ function evaluateGroup(db, clientId, groupKey) {
   const emails = recs.filter((r) => r.source_type === 'outlook_message');
   const task = tasks.find((t) => !JSON.parse(t.data).parent_id) || tasks[0];
   const taskData = task ? JSON.parse(task.data) : {};
+  // Headings like "August 2026" that only group other tasks are not deliverables.
+  if (!item && !emails.length && tasks.every((t) => JSON.parse(t.data).points == null)) {
+    const isParent = db.prepare(`SELECT 1 FROM source_records WHERE client_id = ? AND source_type = 'clickup_task'
+      AND json_extract(data, '$.raw_parent') IN (${tasks.map(() => '?').join(',')}) LIMIT 1`).get(clientId, ...tasks.map((t) => t.external_id));
+    if (isParent) return null;
+  }
 
   const flags = new Set();
   const lines = [];
@@ -168,7 +179,7 @@ function evaluateGroup(db, clientId, groupKey) {
   const sigDate = {}; // latest date each signal was seen
 
   for (const r of recs) {
-    const { signals, fromClient } = recordSignals(db, clientId, r);
+    const { signals, fromClient, tracker } = recordSignals(db, clientId, r);
     evidence.push({ id: r.id, signal: signals.join(',') || 'mention' });
     if (r.source_type === 'clickup_task') {
       if (r === task) taskSignal = signals[0];
@@ -181,7 +192,7 @@ function evaluateGroup(db, clientId, groupKey) {
     for (const s of signals) {
       has[s] = true;
       if (!sigDate[s] || when > sigDate[s]) sigDate[s] = when;
-      if (s === 'approved' && fromClient) has.clientApproved = true;
+      if (s === 'approved' && (fromClient || tracker)) has.clientApproved = true; // the consultants' tracker records agreed work
       if (s === 'canceled' && fromClient) has.clientCanceled = true;
     }
     if (INJECTION.test(`${r.title}\n${r.body}`)) flags.add('embedded_instructions');
@@ -222,7 +233,7 @@ function evaluateGroup(db, clientId, groupKey) {
   else if (has.approved || has.in_progress || has.requested || recs.length) action = 'forecast';
 
   if (!action) return null;
-  if (!isSupport && !item && (action === 'complete' || action === 'approve') && !has.clientApproved) flags.add('no_client_approval_evidence');
+  if (!isSupport && !item && (action === 'complete' || action === 'approve') && !has.clientApproved && !taskData.from_tracker) flags.add('no_client_approval_evidence');
   if (has.changed) flags.add('scope_changed');
 
   // Point amount from the client's menu version.
@@ -259,6 +270,15 @@ function evaluateGroup(db, clientId, groupKey) {
       lines.push('No matching item on this client\'s service menu. Reviewer must choose the item and amount.');
     }
     if (item && action === 'change') lines.unshift(`Scope change on existing entry #${item.id} (${item.state}, ${item.points} pts).`);
+    // The points tracker's own number wins: it is what the consultant recorded for this work.
+    if (taskData.from_tracker && taskData.points != null) {
+      flags.delete('point_cost_unclear'); flags.add('points_from_tracker');
+      proposed = Math.round(taskData.points);
+      if (proposed !== taskData.points) flags.add('fractional_points');
+      const calc = taskData.point_value != null && taskData.how_many != null ? taskData.point_value * taskData.how_many : null;
+      lines.push(`ClickUp tracker: ${taskData.point_value ?? '?'} pts × ${taskData.how_many ?? '?'} = ${taskData.points} total${taskData.department ? ` · ${taskData.department}` : ''}${taskData.tracker_notes ? ` · note: "${taskData.tracker_notes}"` : ''}.`);
+      if (calc != null && Math.abs(calc - taskData.points) > 0.5) { flags.add('sources_disagree'); lines.push(`Point Value × How Many = ${calc}, but Total Points says ${taskData.points}. Confirm the amount.`); }
+    }
   }
   if (flags.has('embedded_instructions')) lines.push('⚠ Source text contains instruction-like language. It was treated as evidence only and not acted on.');
 

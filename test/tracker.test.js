@@ -1,0 +1,90 @@
+'use strict';
+// A ClickUp "points tracker" list, shaped like LeadG2's "2026 Service Point Tracking (900 Points)".
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { openDb } = require('../src/db');
+const admin = require('../src/admin');
+const auth = require('../src/auth');
+const ingest = require('../src/ingest');
+const review = require('../src/review');
+const importer = require('../src/importer');
+const ledger = require('../src/ledger');
+
+const STATUS = { type: 'drop_down', name: 'Service Point Status', type_config: { options: [
+  { id: 'opt-c', name: 'Completed', orderindex: 4 }, { id: 'opt-i', name: 'In Progress', orderindex: 2 }, { id: 'opt-p', name: 'Planned', orderindex: 1 }] } };
+const DEPT = { type: 'drop_down', name: 'Department', type_config: { options: [{ id: 'd-m', name: 'Questco Marketing', orderindex: 0 }] } };
+const task = (id, name, parent, fields = {}) => ({
+  id, name, parent, url: `https://app.clickup.com/t/${id}`, status: { status: 'planned' }, list: { id: '900900' }, space: { id: 'S1' },
+  date_created: '1782957139931', date_updated: String(Date.parse('2026-11-25T12:00:00Z')),
+  custom_fields: [
+    fields.status && { ...STATUS, value: fields.status }, fields.total != null && { name: 'Total Points', type: 'number', value: String(fields.total) },
+    fields.pv != null && { name: 'Point Value', type: 'number', value: String(fields.pv) }, fields.hm != null && { name: 'How Many', type: 'number', value: String(fields.hm) },
+    fields.dept && { ...DEPT, value: fields.dept }].filter(Boolean),
+});
+
+function setup() {
+  const db = openDb(':memory:');
+  auth.createUser(db, { email: 'me@leadg2.example', name: 'Me', role: 'staff', password: 'x-password-1' });
+  const menu = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 't' });
+  const c = admin.createClient(db, { name: 'Questco', termStart: '2026-04-01', termEnd: '2027-03-31', menuVersionId: menu.id,
+    agreementRef: 'Questco 2026 agreement (900 points)', basePoints: 900, openingDate: '2026-11-20', openingUsed: 14, openingCommitted: 16, actor: 't' });
+  admin.addMapping(db, { clientId: c.id, sourceType: 'clickup_list', value: '900900', scope: 'points', actor: 't' });
+  return { db, clientId: c.id };
+}
+
+test('reads tracker fields: Service Point Status, Total Points, and ignores month headings', async () => {
+  const { db, clientId } = setup();
+  const tasks = [
+    task('m-aug', 'August 2026', null),
+    task('t1', 'download pdf + website page', 'm-aug', { status: 'opt-c', total: 14, pv: 7, hm: 2, dept: 'd-m' }),
+    task('t2', 'Lead Scoring + Intent Signals', 'm-sep', { status: 'opt-i', total: 16, pv: 2, hm: 1 }),
+    task('t3', 'December Blogs', 'm-dec', { status: 'opt-p', total: 10, pv: 5, hm: 2 }),
+  ];
+  const adapter = { mode: 'live', fetchTasks: async () => tasks };
+  const r = await ingest.syncSource(db, { clientId, source: 'clickup', adapter });
+  assert.equal(r.status, 'success');
+  const sugg = review.listSuggestions(db, clientId, 'open');
+  const by = Object.fromEntries(sugg.map((s) => [s.title, s]));
+  assert.equal(by['August 2026'], undefined, 'month heading is not a deliverable');
+  assert.equal(sugg.filter((s) => s.title === 'download pdf + website page').length, 1, 'child is its own item, not rolled into the month');
+  assert.deepEqual([by['download pdf + website page'].action, by['download pdf + website page'].proposed_points], ['complete', 14]);
+  assert.deepEqual([by['Lead Scoring + Intent Signals'].action, by['Lead Scoring + Intent Signals'].proposed_points], ['approve', 16]);
+  assert.ok(by['Lead Scoring + Intent Signals'].flags.includes('sources_disagree'), '2 x 1 is not 16');
+  assert.deepEqual([by['December Blogs'].action, by['December Blogs'].proposed_points], ['forecast', 10]);
+  assert.ok(!by['download pdf + website page'].flags.includes('point_cost_unclear'));
+  // Approve without a menu item: the tracker's number is the agreed amount.
+  const before = ledger.balance(db, clientId).used;
+  review.approveSuggestion(db, { id: by['download pdf + website page'].id, actor: 't' });
+  assert.equal(ledger.balance(db, clientId).used, before + 14);
+});
+
+test('opening balance from the tracker (used, committed and planned rows); later status changes become suggestions', async () => {
+  const { db, clientId } = setup();
+  const csv = [
+    'tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id',
+    'CU-t1,2026-08-01,download pdf + website page,Survey download PDF and web page,,14,used,t1',
+    'CU-t2,2026-09-01,Lead Scoring + Intent Signals,Lead scoring and intent signals,,16,committed,t2',
+    'CU-t3,2026-12-01,December Blogs,December blogs,,10,forecast,t3',
+  ].join('\n');
+  importer.importTracker(db, { clientId, csv, actor: 't', opening: true });
+  const b = ledger.balance(db, clientId);
+  assert.deepEqual([b.allocated, b.used, b.committed, b.available, b.forecast], [900, 14, 16, 870, 10]);
+
+  // In ClickUp, December Blogs is now Completed and Lead Scoring too.
+  const tasks = [
+    task('t1', 'download pdf + website page', 'm-aug', { status: 'opt-c', total: 14, pv: 7, hm: 2 }),
+    task('t2', 'Lead Scoring + Intent Signals', 'm-sep', { status: 'opt-c', total: 16, pv: 16, hm: 1 }),
+    task('t3', 'December Blogs', 'm-dec', { status: 'opt-c', total: 10, pv: 5, hm: 2 }),
+  ];
+  await ingest.syncSource(db, { clientId, source: 'clickup', adapter: { mode: 'live', fetchTasks: async () => tasks } });
+  const sugg = review.listSuggestions(db, clientId, 'open');
+  assert.equal(sugg.find((s) => s.title === 'download pdf + website page'), undefined, 'already used: nothing to do');
+  const lead = sugg.find((s) => s.title === 'Lead Scoring + Intent Signals');
+  const dec = sugg.find((s) => s.title === 'December Blogs');
+  assert.deepEqual([lead.action, lead.proposed_points], ['complete', 16]);
+  assert.deepEqual([dec.action, dec.proposed_points], ['complete', 10]);
+  review.approveSuggestion(db, { id: lead.id, actor: 't' });
+  review.approveSuggestion(db, { id: dec.id, actor: 't' });
+  const after = ledger.balance(db, clientId);
+  assert.deepEqual([after.used, after.committed, after.available, after.forecast], [40, 0, 860, 0]);
+});

@@ -55,7 +55,6 @@ function importTracker(db, { clientId, csv, actor, opening = false, filename = '
       const points = Number(r.points);
       if (!state) throw new AppError(400, `Line ${r.__line}: unknown status "${r.status}"`);
       if (!Number.isInteger(points) || points < 0) throw new AppError(400, `Line ${r.__line}: points must be a whole number`);
-      if (opening && state === 'forecast') throw new AppError(400, `Line ${r.__line}: opening balance rows must be used or committed`);
       const ref = `tracker:${r.tracker_id}`;
       const existing = db.prepare('SELECT * FROM work_items WHERE client_id = ? AND external_ref = ?').get(clientId, ref);
       if (existing) {
