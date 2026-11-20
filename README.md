@@ -76,7 +76,10 @@ Emails that contain a task link or `CU-<id>` are grouped with that task. Everyth
 
 ## Branding
 
-The colors come from the LeadG2 "Service Points 2026" one-pager in Canva: navy `#1b263b`, orange `#e17226`, slate `#50606d` and light panels `#f4f4f4`. The font is Montserrat, loaded from Google Fonts. To use the official logo instead of the text wordmark, drop `logo-white.png` (for the navy header) and `logo.png` (for the white sign-in card) into `public/brand/`.
+The look matches leadg2.com:
+- **Colors:** orange `#e17226`, navy `#1b263b` and deep navy `#0d1b2a`.
+- **Type:** Inter Tight for headings and numbers, Mulish for the interface, and Lora for body copy, including the orange italic phrase that finishes headings ("Your service points, *at a glance.*").
+- **Layout:** a white header with the full-color logo (`public/brand/logo.png`), white cards with an orange left edge, 6px-radius orange buttons, deep-navy feature panels and a light-gray footer.
 
 ## The worked example
 

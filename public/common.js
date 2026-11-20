@@ -54,8 +54,9 @@ function renderClientView(v) {
   const pend = v.pending_summaries;
   return h('div', { class: 'client-view' },
     h('header', { class: 'cv-head' },
-      h('h1', {}, v.client.name),
-      h('p', { class: 'muted' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Balance last updated ${fmtDateTime(v.last_updated)}`)),
+      h('p', { class: 'eyebrow' }, v.client.name),
+      h('h1', {}, 'Your service points, ', h('em', {}, 'at a glance.')),
+      h('p', { class: 'lede' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Balance last updated ${fmtDateTime(v.last_updated)}`)),
     h('section', { class: 'stats', 'aria-label': 'Point balance' },
       stat('Total allocated', v.balance.allocated, '', allocNote),
       stat('Used', v.balance.used, 'used', 'Completed work'),
