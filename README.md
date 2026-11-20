@@ -25,6 +25,9 @@ Use the **+ Add points** button in the staff console (top right, and on the Ledg
 
 ## Publishing (hosting)
 
+**IT handoff:** see [DEPLOY.md](DEPLOY.md) for step-by-step deployment with `compose.yaml`.
+
+
 The app ships as a container (`Dockerfile`) with no dependencies. Any host that runs a container with a **persistent disk** will work.
 - Mount a persistent volume at `/data`, where the database lives.
 - Set these environment variables:
