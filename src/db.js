@@ -293,6 +293,8 @@ function migrate(db) {
   if (!has('clients', 'show_planned')) db.exec('ALTER TABLE clients ADD COLUMN show_planned INTEGER NOT NULL DEFAULT 1');
   if (!has('clients', 'hubspot_company_id')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_company_id TEXT');
   if (!has('clients', 'hubspot_synced')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_synced TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS client_pages (client_id INTEGER PRIMARY KEY REFERENCES clients(id), html TEXT, url TEXT,
+    file_name TEXT, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)`);
   if (!has('client_feeds', 'statuses')) db.exec('ALTER TABLE client_feeds ADD COLUMN statuses TEXT');
   if (!has('suggestions', 'evidence_date')) db.exec('ALTER TABLE suggestions ADD COLUMN evidence_date TEXT');
 }

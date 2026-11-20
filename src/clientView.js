@@ -1,4 +1,10 @@
 'use strict';
+const { pageInfo } = require('./pages');
+// Only whether there's a page and where it lives; never who uploaded it.
+function editorialForClient(db, clientId) {
+  const p = pageInfo(db, clientId);
+  return p ? (p.kind === 'url' ? { kind: 'url', url: p.url, updated_at: p.updated_at } : { kind: 'html', updated_at: p.updated_at }) : null;
+}
 // The ONLY function that produces client-facing data. It builds the response from an explicit
 // allow-list of fields, so email bodies, internal notes, review suggestions, source links and other
 // clients' data cannot leak. Staff "preview" calls this exact function.
@@ -31,6 +37,7 @@ function clientDashboard(db, clientId) {
       count: hidden.length,
     },
     content: clientFeeds(db, clientId),
+    editorial_page: editorialForClient(db, clientId),
     by_month: byMonth(db, clientId, { forClient: true, includePlanned: !!client.show_planned }),
     planned: client.show_planned ? { points: b.forecast, available_after: b.available_after_planned } : null,
     support_hours: hours ? { purchased: hours.hours_purchased, used: hours.hours_used, remaining: hours.hours_remaining } : null,

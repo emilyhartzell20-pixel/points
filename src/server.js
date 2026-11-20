@@ -12,6 +12,7 @@ const ingest = require('./ingest');
 const importer = require('./importer');
 const admin = require('./admin');
 const { HubSpotSync } = require('./adapters/hubspot');
+const editorialPages = require('./pages');
 const hubspotSync = require('./hubspotSync');
 const feeds = require('./feeds');
 const { clientDashboard } = require('./clientView');
@@ -52,7 +53,7 @@ function send(res, status, body, headers = {}) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     ...headers,
   });
   res.end(isJson ? JSON.stringify(body) : body);
@@ -124,6 +125,14 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     send(res, 200, clientDashboard(db, user.client_id));
   });
 
+  route('GET', '/api/client/editorial', 'client', ({ res, user }) => {
+    const c = db.prepare('SELECT portal_enabled FROM clients WHERE id = ?').get(user.client_id);
+    if (!c || !c.portal_enabled) throw new AppError(403, 'Dashboard access has not been granted');
+    const page = editorialPages.getPage(db, user.client_id);
+    if (!page || page.html == null) throw new AppError(404, 'Not found');
+    send(res, 200, page.html, editorialPages.PAGE_HEADERS);
+  });
+
   // A client approves or requests changes on something waiting for them (written back to that ClickUp task).
   route('POST', '/api/client/reviews/:taskId', 'client', async ({ req, res, p, user }) => {
     const c = db.prepare('SELECT portal_enabled FROM clients WHERE id = ?').get(user.client_id);
@@ -149,6 +158,7 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
       mappings: db.prepare('SELECT * FROM source_mappings WHERE client_id = ?').all(id),
       connector_mode: Object.fromEntries(Object.entries(adapters).map(([k, a]) => [k, a.mode])),
       hubspot: { configured: hubspot.configured },
+      editorial_page: editorialPages.pageInfo(db, id),
       feeds: feeds.listFeeds(db, id).map((f) => ({ ...f, items: db.prepare('SELECT COUNT(*) n FROM feed_items WHERE feed_id = ?').get(f.id).n })),
     });
   });
@@ -319,6 +329,18 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     const id = clientExists(int(p.id));
     if (!adapters.clickup || adapters.clickup.mode !== 'live') throw new AppError(409, 'ClickUp is not connected');
     send(res, 200, await feeds.refreshFeeds(db, adapters.clickup, { clientId: id }));
+  });
+  route('GET', '/api/staff/clients/:id/editorial', 'staff', ({ res, p }) => {
+    const page = editorialPages.getPage(db, clientExists(int(p.id)));
+    if (!page || page.html == null) throw new AppError(404, 'Not found');
+    send(res, 200, page.html, editorialPages.PAGE_HEADERS);
+  });
+  route('POST', '/api/staff/clients/:id/editorial', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    send(res, 200, editorialPages.setPage(db, { clientId: id, html: b.html, url: b.url, fileName: b.fileName, actor: user.email }));
+  });
+  route('POST', '/api/staff/clients/:id/editorial/remove', 'staff', async ({ res, p, user }) => {
+    editorialPages.removePage(db, { clientId: clientExists(int(p.id)), actor: user.email }); send(res, 200, { ok: true });
   });
   route('GET', '/api/staff/clickup/trackers', 'staff', async ({ res }) => send(res, 200, await ingest.findTrackers(db, adapters.clickup)));
   route('POST', '/api/staff/clickup/trackers/import', 'staff', async ({ req, res, user }) => {

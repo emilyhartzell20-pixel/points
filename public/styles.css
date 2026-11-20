@@ -336,3 +336,6 @@ button.type-chip { cursor: pointer; }
 .cal-stage.in_progress { color: var(--stage-committed); border-color: var(--stage-committed); }
 .cal-stage.planned { color: var(--muted); }
 @media (max-width: 760px) { .cal-item { grid-template-columns: 46px 1fr; } .cal-stage { grid-column: 2; justify-self: start; } .waiting-list li { flex-direction: column; align-items: flex-start; } }
+
+.editorial-frame { width: 100%; height: 80vh; min-height: 560px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; display: block; margin-top: 8px; }
+@media (max-width: 640px) { .editorial-frame { height: 70vh; min-height: 420px; } }

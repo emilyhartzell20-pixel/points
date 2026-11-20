@@ -70,7 +70,7 @@ function renderClientView(v, opts = {}) {
     showPlanned ? h('p', { class: 'planned-note' }, h('span', { class: 'tip-key seg-planned' }),
       `${v.planned.points} more points are planned. If all planned work goes ahead, ${v.planned.available_after} points remain.`) : null,
     months ? renderOutlook(months.look_ahead, { showPlanned, forClient: true }) : null,
-    renderCalendar(v.content),
+    v.editorial_page ? renderEditorialPage(v.editorial_page, opts) : renderCalendar(v.content),
     months ? h('section', { class: 'card' }, h('h2', {}, 'Points by ', h('em', {}, 'month')), monthChart(months.months, {
       showPlanned, onPick: (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } })) : null,
     months ? h('section', { class: 'card' }, h('h2', {}, 'Your work, ', h('em', {}, 'month by month')),
@@ -255,6 +255,15 @@ function renderWaiting(c, { preview = false, onAnswered } = {}) {
     preview && n ? h('p', { class: 'muted small' }, 'Preview: the buttons work only for the client.') : null,
     n ? h('ul', { class: 'waiting-list' }, c.waiting.map(item))
       : h('p', { class: 'muted small' }, 'When we send something for your review or approval, it will appear here.'));
+}
+function renderEditorialPage(pg, { preview = false, clientId } = {}) {
+  const src = pg.kind === 'url' ? pg.url : preview ? `/api/staff/clients/${clientId}/editorial` : '/api/client/editorial';
+  return h('section', { class: 'card editorial-page' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Editorial ', h('em', {}, 'calendar')),
+      h('a', { class: 'small', href: src, target: '_blank', rel: 'noopener noreferrer' }, 'Open full screen ↗')),
+    h('iframe', { class: 'editorial-frame', src, title: 'Editorial calendar', loading: 'lazy', referrerpolicy: 'no-referrer',
+      sandbox: 'allow-scripts allow-popups allow-popups-to-escape-sandbox' }),
+    pg.updated_at ? h('p', { class: 'muted small' }, `Updated ${fmtDateTime(pg.updated_at)}`) : null);
 }
 function renderCalendar(c) {
   if (!c || !c.calendar) return null;

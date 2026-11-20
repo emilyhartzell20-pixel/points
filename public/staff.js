@@ -377,6 +377,7 @@ function renderSources() {
   };
   return h('div', {},
     h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('outlook', 'Outlook'), box('tracker', 'Tracker import')),
+    renderEditorialPageCard(o),
     renderFeedsCard(o),
     renderHubSpotCard(o),
     h('section', { class: 'card' }, h('h2', {}, 'Contract & allocation (source of truth)'),
@@ -384,6 +385,29 @@ function renderSources() {
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
       h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${a.points} pts — ${a.source_ref} (verified by ${a.verified_by})`)))),
     renderMappings(o));
+}
+
+function renderEditorialPageCard(o) {
+  const pg = o.editorial_page;
+  const file = h('input', { type: 'file', accept: '.html,.htm,text/html', 'aria-label': 'HTML file' });
+  const url = h('input', { type: 'url', placeholder: 'https://… (or upload a file instead)', 'aria-label': 'Web address' });
+  const save = async () => {
+    const f = file.files && file.files[0];
+    if (!f && !url.value.trim()) return toast('Choose an HTML file or paste a web address', 'error');
+    const body = f ? { html: await f.text(), fileName: f.name } : { url: url.value.trim() };
+    act(() => api(`/api/staff/clients/${state.clientId}/editorial`, body), 'Editorial calendar updated');
+  };
+  return h('section', { class: 'card' },
+    h('h2', {}, 'Editorial calendar page (HTML)'),
+    h('p', { class: 'muted small' }, 'Show your HTML editorial calendar on the client dashboard, exactly as designed. Upload the .html file (the same one embedded in ClickUp) or paste the web address where it\'s hosted. To update it, upload the new version; it replaces the old one. It replaces the list-based calendar for this client.'),
+    pg ? h('div', { class: 'row' },
+      h('p', { class: 'small' }, pg.kind === 'html' ? `Showing ${pg.file_name || 'uploaded file'} (${Math.round(pg.size / 1024)} KB)` : `Showing ${pg.url}`, ` · updated ${fmtDateTime(pg.updated_at)} by ${pg.updated_by}`),
+      h('div', { class: 'row-actions' },
+        h('a', { class: 'small', href: pg.kind === 'html' ? `/api/staff/clients/${state.clientId}/editorial` : pg.url, target: '_blank', rel: 'noopener noreferrer' }, 'View ↗'),
+        h('button', { class: 'danger', onclick: () => { if (confirm('Stop showing this calendar page to the client?')) act(() => api(`/api/staff/clients/${state.clientId}/editorial/remove`, {}), 'Removed'); } }, 'Remove')))
+      : h('p', { class: 'muted small' }, 'No calendar page yet.'),
+    h('div', { class: 'row' }, h('label', {}, pg ? 'Replace with a file' : 'Upload HTML file', file), h('label', {}, 'or web address', url),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: save }, pg ? 'Replace' : 'Add'))));
 }
 
 function renderFeedsCard(o) {
@@ -561,7 +585,7 @@ async function renderPreview() {
         c.show_planned ? 'Hide planned work' : 'Show planned work')),
     logins,
     h('h2', { class: 'preview-title' }, 'What the client sees'),
-    h('div', { class: 'preview-frame' }, renderClientView(v, { preview: true })));
+    h('div', { class: 'preview-frame' }, renderClientView(v, { preview: true, clientId: state.clientId })));
 }
 
 // ------------------------------------------------------------------ shared: one-time setup link
