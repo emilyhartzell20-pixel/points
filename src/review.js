@@ -1,6 +1,6 @@
 'use strict';
 // Consultant actions on the review queue: approve (optionally with edits), edit, merge, dismiss.
-const { tx, audit, AppError, nowIso } = require('./db');
+const { tx, audit, AppError, nowIso, unitOf, amountOk } = require('./db');
 const ledger = require('./ledger');
 const { requireItem } = require('./menu');
 const { generateSuggestions } = require('./ingest');
@@ -85,7 +85,7 @@ function approveSuggestion(db, p) {
         // Points-tracker items may not map to a menu item: the tracker's Total Points is the agreed amount.
         const menuItem = code ? requireItem(db, s.client_id, code)
           : { code: null, name: 'From ClickUp points tracker', menu_version_id: undefined, points_min: 0, points_max: Number.MAX_SAFE_INTEGER };
-        if (points == null || !Number.isInteger(points)) throw new AppError(400, `Confirm the point amount (menu: ${menuItem.points_min === menuItem.points_max ? menuItem.points_min : `${menuItem.points_min}–${menuItem.points_max}`})`);
+        if (points == null || !amountOk(points, unitOf(db, s.client_id))) throw new AppError(400, `Confirm the point amount (menu: ${menuItem.points_min === menuItem.points_max ? menuItem.points_min : `${menuItem.points_min}–${menuItem.points_max}`})`);
         if ((points < menuItem.points_min || points > menuItem.points_max) && !p.reason) {
           throw new AppError(400, `Amount ${points} is outside the menu (${menuItem.points_min}–${menuItem.points_max}); give a reason for the exception`);
         }

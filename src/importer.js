@@ -2,7 +2,7 @@
 // Opening-balance import from the existing tracker, bulk CSV import, and manual entry.
 // These keep the tracker usable even when a connector is down.
 const crypto = require('node:crypto');
-const { tx, audit, AppError, nowIso } = require('./db');
+const { tx, audit, AppError, nowIso, unitOf, amountOk } = require('./db');
 const ledger = require('./ledger');
 const { requireItem, findItem } = require('./menu');
 
@@ -54,7 +54,7 @@ function importTracker(db, { clientId, csv, actor, opening = false, filename = '
       const state = STATUS[String(r.status).toLowerCase()];
       const points = Number(r.points);
       if (!state) throw new AppError(400, `Line ${r.__line}: unknown status "${r.status}"`);
-      if (!Number.isInteger(points) || points < 0) throw new AppError(400, `Line ${r.__line}: points must be a whole number`);
+      if (!amountOk(points, unitOf(db, clientId))) throw new AppError(400, `Line ${r.__line}: ${unitOf(db, clientId) === 'hours' ? 'hours must be zero or more, in quarter hours' : 'points must be a whole number'}`);
       const ref = `tracker:${r.tracker_id}`;
       const existing = db.prepare('SELECT * FROM work_items WHERE client_id = ? AND external_ref = ?').get(clientId, ref);
       if (existing) {
@@ -101,7 +101,8 @@ function manualEntry(db, p) {
   const points = Number(p.points);
   // Work that is not on the client's menu ("custom") is allowed, but must say why.
   const menu = p.menuItemCode ? requireItem(db, p.clientId, p.menuItemCode) : null;
-  if (!menu && !p.exceptionReason) throw new AppError(400, 'This work is not on the service menu: explain how the point amount was agreed');
+  // Hours clients log time, not menu items, so their entries don't need a pricing explanation.
+  if (!menu && !p.exceptionReason && unitOf(db, p.clientId) !== 'hours') throw new AppError(400, 'This work is not on the service menu: explain how the point amount was agreed');
   if (menu && (points < menu.points_min || points > menu.points_max) && !p.exceptionReason) {
     throw new AppError(400, `Amount ${points} is outside the menu (${menu.points_min}–${menu.points_max}); give an exception reason`);
   }

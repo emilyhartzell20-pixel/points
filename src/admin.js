@@ -3,7 +3,7 @@
 // Every change is audit-logged. Menu edits never touch approved work, because each work item
 // stores its own approved amount, menu item and menu version.
 const crypto = require('node:crypto');
-const { tx, audit, AppError } = require('./db');
+const { tx, audit, AppError, UNITS, assertAmount } = require('./db');
 const auth = require('./auth');
 const { parseCompanyId } = require('./adapters/hubspot');
 
@@ -250,14 +250,17 @@ function createClient(db, p) {
   const name = String(p.name || '').trim();
   if (!name) throw new AppError(400, 'Enter the client\'s name');
   if (!isDate(p.termStart) || !isDate(p.termEnd) || p.termEnd <= p.termStart) throw new AppError(400, 'Enter the contract start and end dates (end after start)');
+  const unit = p.unit === 'hours' ? 'hours' : 'points';
+  if (p.unit != null && !UNITS.includes(p.unit)) throw new AppError(400, 'Choose points or hours');
   const base = Number(p.basePoints);
-  if (!Number.isInteger(base) || base < 0) throw new AppError(400, 'Allocated points must be a whole number');
+  assertAmount(base, unit, { what: unit === 'hours' ? 'Allocated hours' : 'Allocated points' });
   if (!String(p.agreementRef || '').trim()) throw new AppError(400, 'Reference the signed agreement (the source of truth for the allocation)');
   getVersion(db, Number(p.menuVersionId));
   if (db.prepare('SELECT 1 FROM clients WHERE lower(name) = lower(?)').get(name)) throw new AppError(409, 'A client with this name already exists');
   const bonus = Number(p.bonusPoints || 0); const hours = Number(p.supportHours || 0);
   const used = Number(p.openingUsed || 0); const committed = Number(p.openingCommitted || 0);
-  if (![bonus, used, committed].every((n) => Number.isInteger(n) && n >= 0) || !(hours >= 0)) throw new AppError(400, 'Numbers must be zero or more');
+  for (const n of [bonus, used, committed]) assertAmount(n, unit, { what: 'Numbers' });
+  if (!(hours >= 0)) throw new AppError(400, 'Numbers must be zero or more');
   const fromTracker = used > 0 || committed > 0;
   const openingDate = p.openingDate || p.termStart;
   if (!isDate(openingDate)) throw new AppError(400, 'Invalid opening balance date');
@@ -266,7 +269,7 @@ function createClient(db, p) {
   return tx(db, () => {
     let slug = slugify(name); let n = 2;
     while (db.prepare('SELECT 1 FROM clients WHERE slug = ?').get(slug)) slug = `${slugify(name)}-${n++}`;
-    const cid = Number(db.prepare('INSERT INTO clients (slug, name, aliases, hubspot_company_id) VALUES (?,?,?,?)').run(slug, name, JSON.stringify(aliases), hubspotId(p.hubspotCompanyId)).lastInsertRowid);
+    const cid = Number(db.prepare('INSERT INTO clients (slug, name, aliases, hubspot_company_id, unit) VALUES (?,?,?,?,?)').run(slug, name, JSON.stringify(aliases), hubspotId(p.hubspotCompanyId), unit).lastInsertRowid);
     const kid = Number(db.prepare(`INSERT INTO contracts (client_id, term_start, term_end, menu_version_id, agreement_ref, opening_balance_date, opening_used, opening_committed, opening_reconciled_at)
         VALUES (?,?,?,?,?,?,?,?,?)`).run(cid, p.termStart, p.termEnd, Number(p.menuVersionId), String(p.agreementRef).trim(), openingDate, used, committed,
       fromTracker ? null : new Date().toISOString()).lastInsertRowid);
@@ -278,14 +281,19 @@ function createClient(db, p) {
         .run(cid, hours, String(p.supportRef || p.agreementRef).trim(), p.termStart, p.termEnd);
     }
     audit(db, { clientId: cid, actor: p.actor, action: 'client.create', entity: 'client', entityId: cid,
-      detail: { name, term: [p.termStart, p.termEnd], base, bonus, support_hours: hours, opening: fromTracker ? { used, committed, date: openingDate } : null } });
+      detail: { name, unit, term: [p.termStart, p.termEnd], base, bonus, support_hours: hours, opening: fromTracker ? { used, committed, date: openingDate } : null } });
     return { id: cid, slug, needs_opening_import: fromTracker };
   });
 }
 
-function updateClient(db, { clientId, name, aliases, termStart, termEnd, agreementRef, hubspotCompanyId, actor }) {
+function updateClient(db, { clientId, name, aliases, termStart, termEnd, agreementRef, hubspotCompanyId, unit, actor }) {
   const c = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
   if (!c) throw new AppError(404, 'Client not found');
+  if (unit != null && !UNITS.includes(unit)) throw new AppError(400, 'Choose points or hours');
+  if (unit === 'points' && c.unit === 'hours'
+    && db.prepare('SELECT 1 FROM work_items WHERE client_id = ? AND points != CAST(points AS INTEGER) UNION ALL SELECT 1 FROM allocations a JOIN contracts k ON k.id = a.contract_id WHERE k.client_id = ? AND a.points != CAST(a.points AS INTEGER)').get(clientId, clientId)) {
+    throw new AppError(409, 'This client has partial hours recorded (like 1.5), so it can\'t switch to whole points. Correct those entries first.');
+  }
   const k = db.prepare('SELECT * FROM contracts WHERE client_id = ? AND active = 1 ORDER BY id DESC LIMIT 1').get(clientId);
   const ts = termStart || k.term_start; const te = termEnd || k.term_end;
   if (!isDate(ts) || !isDate(te) || te <= ts) throw new AppError(400, 'Contract end must be after the start');
@@ -296,6 +304,7 @@ function updateClient(db, { clientId, name, aliases, termStart, termEnd, agreeme
     db.prepare('UPDATE clients SET name = COALESCE(?, name), aliases = COALESCE(?, aliases) WHERE id = ?').run(
       name ? name.trim() : null, aliases == null ? null : JSON.stringify(String(aliases).split(',').map((a) => a.trim()).filter(Boolean)), clientId);
     db.prepare('UPDATE contracts SET term_start = ?, term_end = ?, agreement_ref = COALESCE(?, agreement_ref) WHERE id = ?').run(ts, te, agreementRef || null, k.id);
+    if (unit && unit !== c.unit) db.prepare('UPDATE clients SET unit = ? WHERE id = ?').run(unit, clientId);
     if (hubspotCompanyId !== undefined) {
       db.prepare('UPDATE clients SET hubspot_company_id = ?, hubspot_synced = NULL WHERE id = ?').run(hubspotId(hubspotCompanyId), clientId);
     }
@@ -305,7 +314,7 @@ function updateClient(db, { clientId, name, aliases, termStart, termEnd, agreeme
 }
 
 function listClientsAdmin(db) {
-  return db.prepare(`SELECT c.id, c.name, c.slug, c.aliases, c.portal_enabled, c.pilot, c.hubspot_company_id, k.term_start, k.term_end, k.agreement_ref,
+  return db.prepare(`SELECT c.id, c.name, c.slug, c.aliases, c.portal_enabled, c.pilot, c.hubspot_company_id, c.unit, k.term_start, k.term_end, k.agreement_ref,
       k.opening_used, k.opening_committed, k.opening_reconciled_at, v.code AS menu_code,
       (SELECT COALESCE(SUM(points),0) FROM allocations a WHERE a.contract_id = k.id) AS allocated,
       (SELECT COUNT(*) FROM users u WHERE u.client_id = c.id) AS logins,

@@ -1,7 +1,7 @@
 'use strict';
 // The points ledger. All balance numbers are derived from append-only events, so every point is
 // counted exactly once: reserve (+committed), consume (-committed +used), release (-committed).
-const { tx, audit, AppError, nowIso } = require('./db');
+const { tx, audit, AppError, nowIso, unitOf, assertAmount } = require('./db');
 
 function activeContract(db, clientId) {
   const c = db.prepare('SELECT * FROM contracts WHERE client_id = ? AND active = 1 ORDER BY id DESC LIMIT 1').get(clientId);
@@ -49,8 +49,8 @@ function getItem(db, id) {
   return w;
 }
 
-function assertPoints(points) {
-  if (!Number.isInteger(points) || points < 0) throw new AppError(400, 'Points must be a non-negative whole number');
+function assertPoints(db, clientId, points) {
+  assertAmount(points, unitOf(db, clientId));
 }
 
 // Guard against accidentally overdrawing. Callers may pass an override reason to proceed.
@@ -69,7 +69,7 @@ function checkCapacity(db, clientId, extra, overrideReason) {
 function createWorkItem(db, p) {
   return tx(db, () => {
     const contract = activeContract(db, p.clientId);
-    assertPoints(p.points);
+    assertPoints(db, p.clientId, p.points);
     if (!['forecast', 'committed', 'used'].includes(p.state)) throw new AppError(400, 'Invalid state');
     if (!p.title) throw new AppError(400, 'Title is required');
     if (p.state !== 'forecast' && p.origin !== 'opening') checkCapacity(db, p.clientId, p.points, p.overrideReason);
@@ -111,7 +111,7 @@ function transition(db, { itemId, to, actor, reason, points, overrideReason, wor
       throw new AppError(409, `Cannot move work from ${from} to ${to}${from === 'used' ? ' (use a correction instead)' : ''}`);
     }
     if (points != null && points !== item.points) {
-      assertPoints(points);
+      assertPoints(db, item.client_id, points);
       if (from === 'committed') {
         // Changing the amount of reserved work is a correction and must be explained.
         correct(db, { itemId, points, actor, reason: reason || 'Amount changed at completion' , overrideReason});
@@ -136,7 +136,7 @@ function transition(db, { itemId, to, actor, reason, points, overrideReason, wor
 /** Change the approved amount of a work item. Logged with who and why; never silently rewrites. */
 function correct(db, { itemId, points, actor, reason, overrideReason }) {
   if (!reason || !String(reason).trim()) throw new AppError(400, 'A reason is required for corrections');
-  assertPoints(points);
+  assertPoints(db, getItem(db, itemId).client_id, points);
   return tx(db, () => {
     const item = getItem(db, itemId);
     const delta = points - item.points;
@@ -197,7 +197,7 @@ function logSupportHours(db, { clientId, hours, description, workDate, actor, su
  */
 function addAllocation(db, { clientId, kind, points, sourceRef, actor, note }) {
   if (!['bonus', 'purchase', 'base'].includes(kind)) throw new AppError(400, 'Choose bonus, purchase or base');
-  if (!Number.isInteger(points) || points <= 0) throw new AppError(400, 'Points must be a positive whole number');
+  assertAmount(points, unitOf(db, clientId), { positive: true });
   if (!sourceRef || !String(sourceRef).trim()) throw new AppError(400, 'Reference the signed agreement, order form or approval for these points');
   return tx(db, () => {
     const contract = activeContract(db, clientId);

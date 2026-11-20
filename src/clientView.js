@@ -14,7 +14,7 @@ const { byMonth } = require('./months');
 const { clientFeeds } = require('./feeds');
 
 function clientDashboard(db, clientId) {
-  const client = db.prepare('SELECT id, name, show_planned FROM clients WHERE id = ?').get(clientId);
+  const client = db.prepare('SELECT id, name, show_planned, unit FROM clients WHERE id = ?').get(clientId);
   if (!client) return null;
   const b = ledger.balance(db, clientId);
   const items = db.prepare(`SELECT id, state, points, work_date, client_summary, summary_approved FROM work_items
@@ -25,6 +25,7 @@ function clientDashboard(db, clientId) {
   const hours = ledger.supportHours(db, clientId);
   return {
     client: { name: client.name },
+    unit: client.unit === 'hours' ? 'hours' : 'points',
     contract_term: { start: b.term_start, end: b.term_end },
     balance: { allocated: b.allocated, used: b.used, committed: b.committed, available: b.available },
     allocation_breakdown: b.allocation_breakdown,

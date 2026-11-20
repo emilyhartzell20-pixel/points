@@ -295,6 +295,7 @@ function migrate(db) {
   if (!has('clients', 'hubspot_synced')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_synced TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS client_pages (client_id INTEGER PRIMARY KEY REFERENCES clients(id), html TEXT, url TEXT,
     file_name TEXT, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)`);
+  if (!has('clients', 'unit')) db.exec("ALTER TABLE clients ADD COLUMN unit TEXT NOT NULL DEFAULT 'points'");
   if (!has('invites', 'replaced_at')) db.exec('ALTER TABLE invites ADD COLUMN replaced_at TEXT');
   if (!has('client_feeds', 'scope')) db.exec("ALTER TABLE client_feeds ADD COLUMN scope TEXT NOT NULL DEFAULT 'list'");
   if (!has('feed_items', 'list_id')) db.exec('ALTER TABLE feed_items ADD COLUMN list_id TEXT');
@@ -334,4 +335,22 @@ class AppError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-module.exports = { openDb, tx, audit, nowIso, AppError };
+// A client tracks either service points (whole numbers) or hours (quarter hours allowed).
+const UNITS = ['points', 'hours'];
+function unitOf(db, clientId) {
+  const r = clientId == null ? null : db.prepare('SELECT unit FROM clients WHERE id = ?').get(clientId);
+  return r && r.unit === 'hours' ? 'hours' : 'points';
+}
+function amountOk(n, unit, { positive = false } = {}) {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || (positive && n === 0)) return false;
+  return unit === 'hours' ? Number.isInteger(n * 4) : Number.isInteger(n);
+}
+function assertAmount(n, unit, { positive = false, what } = {}) {
+  if (!amountOk(n, unit, { positive })) {
+    throw new AppError(400, unit === 'hours'
+      ? `${what || 'Hours'} must be ${positive ? 'more than zero' : 'zero or more'}, in quarter hours (for example 1.5 or 0.25)`
+      : `${what || 'Points'} must be a ${positive ? 'positive' : 'non-negative'} whole number`);
+  }
+}
+
+module.exports = { openDb, tx, audit, nowIso, AppError, UNITS, unitOf, amountOk, assertAmount };

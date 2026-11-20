@@ -48,9 +48,19 @@ function toast(msg, kind = 'ok') {
 async function logout() { await api('/api/logout', {}); location.href = '/login'; }
 
 /** The client dashboard. Shared by the client page and the staff preview, so both show exactly the same. */
+// Each client tracks points or hours; every label follows the client's unit.
+const UNIT_TEXT = {
+  points: { word: 'points', Word: 'Points', abbr: 'pts' },
+  hours: { word: 'hours', Word: 'Hours', abbr: 'hrs' },
+};
+let U = UNIT_TEXT.points;
+function setUnit(u) { U = UNIT_TEXT[u] || UNIT_TEXT.points; return U; }
+const num = (n) => (n == null ? '–' : String(Math.round(Number(n) * 100) / 100));
+
 function renderClientView(v, opts = {}) {
+  setUnit(v.unit);
   const stat = (label, value, cls, note) => h('div', { class: `stat ${cls || ''}` },
-    h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, String(value)), note ? h('div', { class: 'stat-note' }, note) : null);
+    h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, num(value)), note ? h('div', { class: 'stat-note' }, note) : null);
   const bd = v.allocation_breakdown;
   const allocNote = [bd.base && `${bd.base} base`, bd.bonus && `${bd.bonus} bonus`, bd.purchase && `${bd.purchase} purchased`].filter(Boolean).join(' + ');
   const showPlanned = !!v.planned;
@@ -60,27 +70,27 @@ function renderClientView(v, opts = {}) {
     h('header', { class: 'cv-head' },
       h('p', { class: 'eyebrow' }, v.client.name),
       h('h1', {}, 'Your partnership with LeadG2, ', h('em', {}, 'all in one place.')),
-      h('p', { class: 'lede' }, 'What needs you, what\'s coming up, and where your service points stand.'),
+      h('p', { class: 'lede' }, `What needs you, what's coming up, and where your service ${U.word} stand.`),
       h('p', { class: 'muted small' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Last updated ${fmtDateTime(v.last_updated)}`)),
     renderLinks(v.links),
     renderWaiting(v.content, opts),
-    h('h2', { class: 'section-title' }, 'Your service ', h('em', {}, 'points')),
-    h('section', { class: 'stats', 'aria-label': 'Point balance' },
+    h('h2', { class: 'section-title' }, 'Your service ', h('em', {}, U.word)),
+    h('section', { class: 'stats', 'aria-label': `${U.Word} balance` },
       stat('Total allocated', v.balance.allocated, '', allocNote),
       stat('Used', v.balance.used, 'used', 'Completed work'),
       stat('Committed', v.balance.committed, 'committed', 'Approved, not yet complete'),
       stat('Available', v.balance.available, 'available', 'Allocated − used − committed')),
     showPlanned ? h('p', { class: 'planned-note' }, h('span', { class: 'tip-key seg-planned' }),
-      `${v.planned.points} more points are planned. If all planned work goes ahead, ${v.planned.available_after} points remain.`) : null,
+      `${num(v.planned.points)} more ${U.word} are planned. If all planned work goes ahead, ${num(v.planned.available_after)} ${U.word} remain.`) : null,
     months ? renderOutlook(months.look_ahead, { showPlanned, forClient: true }) : null,
     v.editorial_page ? renderEditorialPage(v.editorial_page, opts) : renderCalendar(v.content),
-    months ? h('section', { class: 'card' }, h('h2', {}, 'Points by ', h('em', {}, 'month')), monthChart(months.months, {
+    months ? h('section', { class: 'card' }, h('h2', {}, `${U.Word} by `, h('em', {}, 'month')), monthChart(months.months, {
       showPlanned, onPick: (key) => { const el = document.getElementById(`month-${key}`); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } })) : null,
     months ? h('section', { class: 'card' }, h('h2', {}, 'Your work, ', h('em', {}, 'month by month')),
       monthList(months, { showPlanned, forClient: true, renderItem: (it) => h('span', { class: 'work-desc' }, it.description) })) : null,
-    pend.count ? h('p', { class: 'muted small' }, `${pend.count} item(s) totaling ${pend.used_points + pend.committed_points} points are included in the numbers above; their descriptions are being finalized.`) : null,
+    pend.count ? h('p', { class: 'muted small' }, `${pend.count} item(s) totaling ${num(pend.used_points + pend.committed_points)} ${U.word} are included in the numbers above; their descriptions are being finalized.`) : null,
     v.support_hours ? h('section', { class: 'card' }, h('h2', {}, 'HubSpot support hours'),
-      h('p', {}, `${v.support_hours.remaining} of ${v.support_hours.purchased} hours remaining (${v.support_hours.used} used). Support hours are tracked separately from points.`)) : null);
+      h('p', {}, `${v.support_hours.remaining} of ${v.support_hours.purchased} hours remaining (${v.support_hours.used} used). Support hours are tracked separately${v.unit === 'hours' ? ' from the hours above' : ' from points'}.`)) : null);
 }
 
 // ------------------------------------------------------------------ "By month" visuals (shared)
@@ -111,7 +121,7 @@ function monthChart(months, { showPlanned = true, onPick } = {}) {
   const y = (v) => top + plotH - (v / yMax) * plotH;
   const width = left + months.length * W + 8;
   const nowKey = new Date().toISOString().slice(0, 7);
-  const svg = s('svg', { viewBox: `0 0 ${width} ${H}`, class: 'month-chart', role: 'img', 'aria-label': 'Points by month: completed, approved and planned' },
+  const svg = s('svg', { viewBox: `0 0 ${width} ${H}`, class: 'month-chart', role: 'img', 'aria-label': `${U.Word} by month: completed, approved and planned` },
     s('defs', {}, s('pattern', { id: 'planned-hatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
       s('rect', { width: 6, height: 6, class: 'seg-planned-bg' }), s('line', { x1: 0, y1: 0, x2: 0, y2: 6, class: 'seg-planned-line' }))));
   for (let v = 0; v <= yMax; v += step) {
@@ -139,7 +149,7 @@ function monthChart(months, { showPlanned = true, onPick } = {}) {
     const hit = s('rect', { x: left + i * W, y: top, width: W, height: plotH + 4, class: 'hit', tabindex: '0', 'aria-label': `${m.label}: ${m.used} completed, ${m.committed} approved${showPlanned ? `, ${m.planned} planned` : ''}` });
     const show = () => {
       tip.replaceChildren(h('strong', {}, m.label),
-        ...['used', 'committed', ...(showPlanned ? ['planned'] : [])].map((k) => h('div', { class: 'tip-row' }, h('span', { class: `tip-key seg-${k}` }), `${STAGE_LABEL[k]}`, h('span', { class: 'tip-val' }, `${m[k]} pts`))));
+        ...['used', 'committed', ...(showPlanned ? ['planned'] : [])].map((k) => h('div', { class: 'tip-row' }, h('span', { class: `tip-key seg-${k}` }), `${STAGE_LABEL[k]}`, h('span', { class: 'tip-val' }, `${num(m[k])} ${U.abbr}`))));
       tip.hidden = false;
       const pct = ((left + i * W + W / 2) / width) * 100;
       tip.style.left = `${Math.min(80, Math.max(2, pct - 10))}%`;
@@ -172,17 +182,17 @@ function monthList(data, { renderItem, showPlanned = true, forClient = false }) 
     const totalShown = m.used + m.committed + (showPlanned ? m.planned : 0);
     if (forClient && !totalShown) continue;
     const near = Math.abs((+m.key.slice(0, 4) * 12 + +m.key.slice(5)) - (+nowKey.slice(0, 4) * 12 + +nowKey.slice(5))) <= 1;
-    const parts = [m.used && `${m.used} completed`, m.committed && `${m.committed} approved`, showPlanned && m.planned && `${m.planned} planned`].filter(Boolean);
+    const parts = [m.used && `${num(m.used)} completed`, m.committed && `${num(m.committed)} approved`, showPlanned && m.planned && `${num(m.planned)} planned`].filter(Boolean);
     sections.push(h('details', { class: `month${m.key === nowKey ? ' current' : ''}`, id: `month-${m.key}`, open: near ? true : null },
       h('summary', {}, h('span', { class: 'month-name' }, m.label, m.key === nowKey ? h('span', { class: 'now-pill' }, 'This month') : null),
-        h('span', { class: 'month-total' }, totalShown ? `${totalShown} pts` : 'No work yet'), h('span', { class: 'month-parts muted small' }, parts.join(' · '))),
+        h('span', { class: 'month-total' }, totalShown ? `${num(totalShown)} ${U.abbr}` : 'No work yet'), h('span', { class: 'month-parts muted small' }, parts.join(' · '))),
       m.items.length || m.other_points ? h('ul', { class: 'month-items' },
         m.items.map((it) => h('li', { class: `month-item stage-${it.stage}`, 'data-type': it.type },
           typeChip(typeBySlot[it.type] || { name: it.type, slot: 9 }),
           h('div', { class: 'month-item-main' }, renderItem(it)),
           h('span', { class: `stage-pill ${it.stage}` }, STAGE_LABEL[it.stage]),
-          h('span', { class: 'month-item-pts' }, `${it.points} pts`))),
-        m.other_points ? h('li', { class: 'month-item other' }, h('span', { class: 'muted small' }, `${m.other_points} more points of work (descriptions being finalized)`)) : null)
+          h('span', { class: 'month-item-pts' }, `${num(it.points)} ${U.abbr}`))),
+        m.other_points ? h('li', { class: 'month-item other' }, h('span', { class: 'muted small' }, `${num(m.other_points)} more ${U.word} of work (descriptions being finalized)`)) : null)
         : h('p', { class: 'muted small empty-month' }, 'Nothing scheduled.')));
   }
   return h('div', { class: 'month-list' }, data.types.length ? filterBar : null, ...sections);
@@ -195,22 +205,22 @@ function renderOutlook(o, { showPlanned = true, forClient = false } = {}) {
   const over = o.remaining_at_end < 0;
   const rows = o.months.map((m) => h('tr', { class: `${m.key === o.from ? 'now' : ''}${m.after_term ? ' after-term' : ''}${m.key === 'earlier' ? ' earlier' : ''}` },
     h('td', {}, m.label, m.key === o.from ? h('span', { class: 'now-pill' }, 'This month') : null, m.after_term ? h('span', { class: 'muted small' }, ' · after contract end') : null),
-    h('td', { class: 'num' }, m.committed ? `${m.committed}` : '–'),
-    showPlanned ? h('td', { class: 'num' }, m.planned ? `${m.planned}` : '–') : null,
-    h('td', { class: `num remaining${m.remaining_after < 0 ? ' neg' : ''}` }, m.remaining_after < 0 ? `⚠ ${m.remaining_after}` : String(m.remaining_after))));
+    h('td', { class: 'num' }, m.committed ? num(m.committed) : '–'),
+    showPlanned ? h('td', { class: 'num' }, m.planned ? num(m.planned) : '–') : null,
+    h('td', { class: `num remaining${m.remaining_after < 0 ? ' neg' : ''}` }, m.remaining_after < 0 ? `⚠ ${num(m.remaining_after)}` : num(m.remaining_after))));
   return h('section', { class: 'card outlook' },
     h('div', { class: 'toolbar' }, h('h2', {}, 'Looking ', h('em', {}, 'ahead')),
       h('span', { class: 'muted small' }, `Contract runs through ${endLabel} · ${o.months_left} month${o.months_left === 1 ? '' : 's'} left`)),
     h('p', { class: `outlook-summary${over ? ' neg' : ''}` }, over
-      ? `⚠ If everything ${showPlanned ? 'planned' : 'approved'} goes ahead, the allocation runs out: ${Math.abs(o.remaining_at_end)} points over by ${endLabel}.`
+      ? `⚠ If everything ${showPlanned ? 'planned' : 'approved'} goes ahead, the allocation runs out: ${num(Math.abs(o.remaining_at_end))} ${U.word} over by ${endLabel}.`
       : showPlanned
-        ? `${o.available_now} points available today. If everything planned goes ahead, ${o.remaining_at_end} points remain at the end of the contract (${endLabel}).`
-        : `${o.available_now} points available today, through the end of the contract (${endLabel}).`),
+        ? `${num(o.available_now)} ${U.word} available today. If everything planned goes ahead, ${num(o.remaining_at_end)} ${U.word} remain at the end of the contract (${endLabel}).`
+        : `${num(o.available_now)} ${U.word} available today, through the end of the contract (${endLabel}).`),
     h('div', { class: 'table-wrap' }, h('table', { class: 'outlook-table' },
       h('thead', {}, h('tr', {}, h('th', {}, 'Month'), h('th', { class: 'num' }, 'Approved'), showPlanned ? h('th', { class: 'num' }, 'Planned') : null,
-        h('th', { class: 'num' }, forClient ? 'Points left after' : 'Remaining after'))),
+        h('th', { class: 'num' }, forClient ? `${U.Word} left after` : 'Remaining after'))),
       h('tbody', {}, rows))),
-    h('p', { class: 'muted small' }, 'Approved points are already reserved, so they’re included in today’s available number. Planned points come off as each month goes ahead.'));
+    h('p', { class: 'muted small' }, `Approved ${U.word} are already reserved, so they’re included in today’s available number. Planned ${U.word} come off as each month goes ahead.`));
 }
 
 // ------------------------------------------------------------------ client content: waiting on you + editorial calendar

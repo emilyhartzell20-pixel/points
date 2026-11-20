@@ -41,21 +41,23 @@ function openAddPoints(mode = 'work') {
   if (mode === 'work') {
     const menuSel = h('select', { name: 'menuItemCode' }, h('option', { value: '' }, 'Custom – not on the menu'),
       o.menu.items.map((i) => h('option', { value: i.code }, `${i.name} (${i.points_min === i.points_max ? i.points_min : `${i.points_min}–${i.points_max}`} pts)`)));
-    const pts = h('input', { name: 'points', type: 'number', min: '0', step: '1', required: true });
+    const pts = h('input', { name: 'points', type: 'number', min: '0', step: U.word === 'hours' ? '0.25' : '1', required: true });
     const st = h('select', { name: 'state' },
-      h('option', { value: 'used' }, 'Completed – use points now'),
-      h('option', { value: 'committed' }, 'Approved, not done yet – reserve points'),
-      h('option', { value: 'forecast' }, 'Planned – no points move yet'));
-    const exc = h('label', {}, 'Why this amount? (required for custom work or amounts outside the menu)', h('input', { name: 'exceptionReason', placeholder: 'e.g. Agreed 6 pts with Dana for a one-off training deck' }));
+      h('option', { value: 'used' }, `Completed – use ${U.word} now`),
+      h('option', { value: 'committed' }, `Approved, not done yet – reserve ${U.word}`),
+      h('option', { value: 'forecast' }, `Planned – no ${U.word} move yet`));
+    const exc = U.word === 'hours'
+      ? h('label', {}, 'Note on the time (optional)', h('input', { name: 'exceptionReason', placeholder: 'e.g. 1.5 h strategy call with Dana' }))
+      : h('label', {}, 'Why this amount? (required for custom work or amounts outside the menu)', h('input', { name: 'exceptionReason', placeholder: 'e.g. Agreed 6 pts with Dana for a one-off training deck' }));
     const update = () => {
       const m = o.menu.items.find((i) => i.code === menuSel.value);
       if (m && pts.dataset.auto !== 'off') pts.value = m.points_min === m.points_max ? m.points_min : '';
       const n = Number(pts.value) || 0;
       const outside = m ? (n < m.points_min || n > m.points_max) : true;
-      exc.hidden = !outside;
+      exc.hidden = U.word === 'hours' ? false : !outside;
       const s2 = st.value;
-      impact.textContent = s2 === 'forecast' ? `No change to the balance. Planned becomes ${b.forecast + n} pts; available after planned ${b.available_after_planned - n}.`
-        : `Available goes from ${b.available} to ${b.available - n}. ${s2 === 'used' ? `Used becomes ${b.used + n}.` : `Committed becomes ${b.committed + n}.`}`;
+      impact.textContent = s2 === 'forecast' ? `No change to the balance. Planned becomes ${num(b.forecast + n)} ${U.abbr}; available after planned ${num(b.available_after_planned - n)}.`
+        : `Available goes from ${num(b.available)} to ${num(b.available - n)}. ${s2 === 'used' ? `Used becomes ${num(b.used + n)}.` : `Committed becomes ${num(b.committed + n)}.`}`;
     };
     pts.addEventListener('input', () => { pts.dataset.auto = 'off'; update(); });
     menuSel.addEventListener('change', () => { pts.dataset.auto = 'on'; update(); });
@@ -63,7 +65,7 @@ function openAddPoints(mode = 'work') {
     form = h('form', { class: 'grid-form' },
       h('div', { class: 'hint' }, 'For work that never appeared in ClickUp or email: a call, a Teams message, a hallway request. It goes straight onto the ledger and is logged with your name.'),
       h('label', {}, 'What was the work?', h('input', { name: 'title', required: true, placeholder: 'e.g. Rebuilt the partner referral form' })),
-      h('div', { class: 'row' }, h('label', {}, 'Service menu item', menuSel), h('label', {}, 'Points', pts)),
+      h('div', { class: 'row' }, h('label', {}, 'Service menu item', menuSel), h('label', {}, U.Word, pts)),
       exc,
       h('div', { class: 'row' }, h('label', {}, 'Status', st), h('label', {}, 'Date', h('input', { name: 'workDate', type: 'date', value: today }))),
       h('label', {}, 'How do we know? (who asked / approved, and where)', h('input', { name: 'reason', required: true, placeholder: 'e.g. Dana approved on our 11/18 call' })),
@@ -83,14 +85,14 @@ function openAddPoints(mode = 'work') {
     });
     setTimeout(update);
   } else {
-    const pts = h('input', { name: 'points', type: 'number', min: '1', step: '1', required: true });
+    const pts = h('input', { name: 'points', type: 'number', min: U.word === 'hours' ? '0.25' : '1', step: U.word === 'hours' ? '0.25' : '1', required: true });
     const update = () => { const n = Number(pts.value) || 0; impact.textContent = `Allocated goes from ${b.allocated} to ${b.allocated + n}; available from ${b.available} to ${b.available + n}.`; };
     pts.addEventListener('input', update);
     form = h('form', { class: 'grid-form' },
-      h('div', { class: 'hint' }, 'For bonus points or additional points the client bought. The signed agreement or order form is the source of truth, so reference it.'),
+      h('div', { class: 'hint' }, `For bonus ${U.word} or additional ${U.word} the client bought. The signed agreement or order form is the source of truth, so reference it.`),
       h('div', { class: 'row' },
-        h('label', {}, 'Type', h('select', { name: 'kind' }, h('option', { value: 'purchase' }, 'Additional purchase'), h('option', { value: 'bonus' }, 'Bonus points'))),
-        h('label', {}, 'Points', pts)),
+        h('label', {}, 'Type', h('select', { name: 'kind' }, h('option', { value: 'purchase' }, 'Additional purchase'), h('option', { value: 'bonus' }, `Bonus ${U.word}`))),
+        h('label', {}, U.Word, pts)),
       h('label', {}, 'Agreement / order form reference', h('input', { name: 'sourceRef', required: true, placeholder: 'e.g. Order form PO-1204, signed 2026-11-18' })),
       h('label', {}, 'Note (optional)', h('input', { name: 'note' })),
       impact,
@@ -103,7 +105,7 @@ function openAddPoints(mode = 'work') {
     update();
   }
   body.append(seg, form);
-  dlg.append(h('div', { class: 'dlg-head' }, h('h2', {}, `Add points · ${o.client.name}`), h('button', { type: 'button', onclick: close, 'aria-label': 'Close' }, 'Close')), body);
+  dlg.append(h('div', { class: 'dlg-head' }, h('h2', {}, `Add ${U.word} · ${o.client.name}`), h('button', { type: 'button', onclick: close, 'aria-label': 'Close' }, 'Close')), body);
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
   document.body.append(dlg);
   dlg.showModal();
@@ -146,8 +148,10 @@ async function init() {
 async function refresh() {
   if (state.area !== 'workspace' || !state.clientId) { state.overview = null; return render(); }
   state.overview = await api(`/api/staff/clients/${state.clientId}/overview`);
+  setUnit(state.overview.client.unit);
+  document.getElementById('add-points').textContent = `+ Add ${U.word}`;
   const b = state.overview.balance;
-  const s = (label, v, cls) => h('div', { class: `stat ${cls || ''}` }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, String(v)));
+  const s = (label, v, cls) => h('div', { class: `stat ${cls || ''}` }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, typeof v === 'number' ? num(v) : String(v)));
   document.getElementById('balance').replaceChildren(
     s('Allocated', b.allocated), s('Used', b.used, 'used'), s('Committed', b.committed, 'committed'), s('Available', b.available, 'available'),
     s('Planned (not counted)', b.forecast, 'forecast'),
@@ -258,7 +262,7 @@ async function renderMonths() {
   return h('div', {},
     renderOutlook(data.look_ahead, { showPlanned: true }),
     h('section', { class: 'card' },
-      h('div', { class: 'toolbar' }, h('h2', {}, 'Points by ', h('em', {}, 'month')),
+      h('div', { class: 'toolbar' }, h('h2', {}, `${U.Word} by `, h('em', {}, 'month')),
         h('span', { class: 'muted small' }, `${b.used} used · ${b.committed} committed · ${b.forecast} planned of ${b.allocated}`)),
       monthChart(data.months, { showPlanned: true, onPick: jump })),
     h('section', { class: 'card' },
@@ -291,12 +295,12 @@ async function renderLedger() {
     act(() => api(`/api/staff/work-items/${w.id}/summary`, { clientSummary: text, approved: ok }), 'Summary saved');
   };
   return h('div', {},
-    h('section', { class: 'card' }, h('div', { class: 'toolbar' }, h('h2', {}, 'Work items'), h('button', { class: 'primary', onclick: () => openAddPoints() }, '+ Add points')),
+    h('section', { class: 'card' }, h('div', { class: 'toolbar' }, h('h2', {}, 'Work items'), h('button', { class: 'primary', onclick: () => openAddPoints() }, `+ Add ${U.word}`)),
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Date', 'Work', 'State', 'Points', 'Menu', 'Origin', 'Client summary', 'Evidence', ''].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['Date', 'Work', 'State', U.Word, 'Menu', 'Origin', 'Client summary', 'Evidence', ''].map((t) => h('th', {}, t)))),
         h('tbody', {}, items.map((w) => h('tr', { class: `state-${w.state}` },
           h('td', {}, fmtDate(w.work_date)), h('td', {}, w.title), h('td', {}, h('span', { class: `badge st-${w.state}` }, w.state === 'forecast' ? 'planned' : w.state)),
-          h('td', { class: 'num' }, String(w.points)), h('td', {}, w.menu_item_code || '—'), h('td', {}, w.origin),
+          h('td', { class: 'num' }, num(w.points)), h('td', {}, w.menu_item_code || '—'), h('td', {}, w.origin),
           h('td', {}, w.client_summary ? `${w.client_summary}${w.summary_approved ? ' ✓' : ' (not approved)'}` : '—'),
           h('td', {}, w.evidence.map((e) => (e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer', class: 'ev-link' }, e.source_type === 'clickup_task' ? 'ClickUp' : 'Email') : null))),
           h('td', { class: 'row-actions' },
@@ -383,7 +387,7 @@ function renderSources() {
     h('section', { class: 'card' }, h('h2', {}, 'Contract & allocation (source of truth)'),
       h('p', {}, `${o.contract.agreement_ref} · term ${fmtDate(o.contract.term_start)} – ${fmtDate(o.contract.term_end)} · menu ${o.menu.version.code}`),
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
-      h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${a.points} pts — ${a.source_ref} (verified by ${a.verified_by})`)))),
+      h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${num(a.points)} ${U.abbr} — ${a.source_ref} (verified by ${a.verified_by})`)))),
     renderMappings(o));
 }
 
@@ -664,10 +668,21 @@ async function renderClients() {
     ? menus.map((m) => h('option', { value: m.id }, `${m.code} · ${m.name}`))
     : h('option', { value: '' }, 'Create a service menu first (Service menu tab)'));
   const tracker = h('input', { type: 'checkbox', name: 'fromTracker' });
+  const unitSel = h('select', { name: 'unit' }, h('option', { value: 'points' }, 'Service points'), h('option', { value: 'hours' }, 'Hours'));
+  const baseIn = f('basePoints', { type: 'number', min: '0', step: '1', required: true });
+  const bonusIn = f('bonusPoints', { type: 'number', min: '0', step: '1', value: '0' });
+  const allocLabel = document.createTextNode('Points allocated'); const bonusLabel = document.createTextNode('Bonus points (optional)');
+  const usedLabel = document.createTextNode('Points already used'); const comLabel = document.createTextNode('Points committed (approved, not done)');
+  unitSel.addEventListener('change', () => {
+    const hrs = unitSel.value === 'hours'; const w = hrs ? 'Hours' : 'Points';
+    allocLabel.textContent = `${w} allocated`; bonusLabel.textContent = `Bonus ${w.toLowerCase()} (optional)`;
+    usedLabel.textContent = `${w} already used`; comLabel.textContent = `${w} committed (approved, not done)`;
+    for (const el of form.querySelectorAll('input[name=basePoints], input[name=bonusPoints], input[name=openingUsed], input[name=openingCommitted]')) el.step = hrs ? '0.25' : '1';
+  });
   const trackerFields = h('div', { class: 'form-grid', hidden: true },
     h('label', {}, 'Balance as of (date)', f('openingDate', { type: 'date' })),
-    h('label', {}, 'Points already used', f('openingUsed', { type: 'number', min: '0', step: '1', value: '0' })),
-    h('label', {}, 'Points committed (approved, not done)', f('openingCommitted', { type: 'number', min: '0', step: '1', value: '0' })));
+    h('label', {}, usedLabel, f('openingUsed', { type: 'number', min: '0', step: '1', value: '0' })),
+    h('label', {}, comLabel, f('openingCommitted', { type: 'number', min: '0', step: '1', value: '0' })));
   tracker.addEventListener('change', () => { trackerFields.hidden = !tracker.checked; });
   const form = h('form', { class: 'card' },
     h('h2', {}, 'Add a client'),
@@ -682,10 +697,11 @@ async function renderClients() {
       h('label', {}, 'Term ends', f('termEnd', { type: 'date', required: true })),
       h('label', {}, 'Service menu', menuSel),
       h('label', {}, 'Agreement reference', f('agreementRef', { required: true, placeholder: 'e.g. Services Agreement signed 2026-03-18' }))),
-    h('div', { class: 'form-section' }, 'Points and hours'),
+    h('div', { class: 'form-section' }, 'Points or hours'),
     h('div', { class: 'form-grid' },
-      h('label', {}, 'Points allocated', f('basePoints', { type: 'number', min: '0', step: '1', required: true })),
-      h('label', {}, 'Bonus points (optional)', f('bonusPoints', { type: 'number', min: '0', step: '1', value: '0' })),
+      h('label', {}, 'This client buys', unitSel),
+      h('label', {}, allocLabel, baseIn),
+      h('label', {}, bonusLabel, bonusIn),
       h('label', {}, 'HubSpot support hours bank (optional)', f('supportHours', { type: 'number', min: '0', step: '0.5', value: '0' }))),
     h('label', { class: 'check' }, tracker, 'This client already has history in our old tracker'),
     h('p', { class: 'muted small' }, 'Leave unchecked for a brand-new client: they start at zero used. If checked, enter the reconciled totals from the tracker; then import the tracker file on the Import tab (tick "reconciled opening balance") and the app checks it matches.'),
@@ -773,17 +789,19 @@ function editClient(c) {
   const ts = h('input', { type: 'date', value: c.term_start }); const te = h('input', { type: 'date', value: c.term_end });
   const ref = h('input', { value: c.agreement_ref || '' });
   const hs = h('input', { value: c.hubspot_company_id || '', placeholder: 'Paste the HubSpot company record URL' });
+  const unit = h('select', {}, h('option', { value: 'points', selected: c.unit !== 'hours' }, 'Service points'), h('option', { value: 'hours', selected: c.unit === 'hours' }, 'Hours'));
   const form = h('form', { class: 'dlg-body' },
     h('label', {}, 'Client name', name), h('label', {}, 'Other names they go by (comma-separated)', aliases),
     h('div', { class: 'row' }, h('label', {}, 'Term starts', ts), h('label', {}, 'Term ends', te)),
     h('label', {}, 'Agreement reference', ref),
     h('label', {}, 'HubSpot company (record URL or ID)', hs),
-    h('p', { class: 'muted small' }, 'To change points, use "+ Add points → Add to allocation" in the client workspace. To change their menu, use the Service menu tab.'),
+    h('label', {}, 'This client buys', unit),
+    h('p', { class: 'muted small' }, 'Switching only changes the labels: the numbers already recorded stay as they are. To change points, use "+ Add points → Add to allocation" in the client workspace. To change their menu, use the Service menu tab.'),
     h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Save'), h('button', { type: 'button', onclick: close }, 'Cancel')));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api(`/api/staff/clients/${c.id}`, { name: name.value, aliases: aliases.value, termStart: ts.value, termEnd: te.value, agreementRef: ref.value, hubspotCompanyId: hs.value });
+      await api(`/api/staff/clients/${c.id}`, { name: name.value, aliases: aliases.value, termStart: ts.value, termEnd: te.value, agreementRef: ref.value, hubspotCompanyId: hs.value, unit: unit.value });
       close(); await loadClients(); toast('Client updated'); render();
     } catch (ex) { toast(ex.message, 'error'); }
   });
