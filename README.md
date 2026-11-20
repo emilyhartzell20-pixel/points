@@ -23,6 +23,31 @@ Use the **+ Add points** button in the staff console (top right, and on the Ledg
 - **Log work:** for work that never showed up in ClickUp or email, such as a call, a Teams message or a hallway request. Pick a menu item or "Custom – not on the menu", set the status (completed uses points, approved reserves them, planned is forecast only), and say how you know it was approved. Custom work and amounts outside the menu need a "why this amount" note. You can attach an optional evidence link, which stays internal. A live preview shows how the balance will change before you save. Each entry is logged with your name.
 - **Add to allocation:** for bonus points or additional purchased points. This requires a reference to the signed agreement or order form.
 
+## The admin area
+
+Sign in as staff and click **Admin** at the top right. It has three tabs:
+- **Clients:** every customer, with a setup checklist ("To do: add sources, add logins, turn on access"), plus the **Add a client** form (name, contract term, menu, agreement reference, points, optional bonus and support hours).
+- **LeadG2 team:** add or remove admins. New admins get a one-time link to set their own password. You can't remove yourself, and the last admin can't be removed.
+- **Service menu:** see below.
+
+**Client workspace** (top right) is where day-to-day work happens for the client picked in the dropdown.
+
+### Starting for real (no sample data)
+
+```bash
+npm run create-admin -- you@leadg2.com "Your Name"
+```
+
+```bash
+npm start
+```
+
+Open the printed link, choose a password and sign in. Then:
+1. Admin → Service menu: create the menu.
+2. Admin → Clients: add a client.
+3. Sources & sync: map their ClickUp lists and email domain.
+4. Client access: add logins and turn on access.
+
 ## Editing the service menu
 
 Open the **Service menu** tab.

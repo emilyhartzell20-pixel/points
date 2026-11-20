@@ -205,6 +205,30 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
     send(res, 200, r);
   });
 
+  // ---- LeadG2 team
+  route('GET', '/api/staff/team', 'staff', ({ res, user }) => send(res, 200, { me: user.id, members: admin.listStaff(db) }));
+  route('POST', '/api/staff/team', 'staff', async ({ req, res, user }) => {
+    const b = await readJson(req); const r = admin.inviteStaff(db, { email: b.email, name: b.name, actor: user.email });
+    send(res, 200, { userId: r.userId, link: inviteLink(req, r.token), expires_at: r.expires_at });
+  });
+  route('POST', '/api/staff/team/:uid/link', 'staff', async ({ req, res, p, user }) => {
+    const r = admin.newStaffLink(db, { userId: int(p.uid), actor: user.email });
+    send(res, 200, { link: inviteLink(req, r.token), expires_at: r.expires_at });
+  });
+  route('POST', '/api/staff/team/:uid/remove', 'staff', async ({ res, p, user }) => {
+    admin.removeStaff(db, { userId: int(p.uid), actorId: user.id, actor: user.email }); send(res, 200, { ok: true });
+  });
+
+  // ---- clients (customers)
+  route('GET', '/api/staff/clients-admin', 'staff', ({ res }) => send(res, 200, admin.listClientsAdmin(db)));
+  route('POST', '/api/staff/clients', 'staff', async ({ req, res, user }) => {
+    const b = await readJson(req); send(res, 200, admin.createClient(db, { ...b, actor: user.email }));
+  });
+  route('POST', '/api/staff/clients/:id', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    admin.updateClient(db, { ...b, clientId: id, actor: user.email }); send(res, 200, { ok: true });
+  });
+
   // ---- source mappings
   route('POST', '/api/staff/clients/:id/mappings', 'staff', async ({ req, res, p, user }) => {
     const id = clientExists(int(p.id)); const b = await readJson(req);
@@ -266,8 +290,8 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
 
 if (require.main === module) {
   const db = openDb();
-  if (!db.prepare('SELECT 1 FROM clients LIMIT 1').get()) {
-    console.error('Database is empty. Run `npm run demo` (sample data) first.');
+  if (!db.prepare(`SELECT 1 FROM users WHERE role = 'staff' LIMIT 1`).get()) {
+    console.error('No admin accounts yet. Run `npm run create-admin -- you@leadg2.com "Your Name"` first (or `npm run demo` for sample data).');
     process.exit(1);
   }
   const port = Number(process.env.PORT || 3000);

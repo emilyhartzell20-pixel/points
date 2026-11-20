@@ -1,5 +1,5 @@
 'use strict';
-const state = { clientId: null, tab: 'review', overview: null, clients: [], menuId: null };
+const state = { clientId: null, tab: 'review', overview: null, clients: [], menuId: null, area: 'workspace' };
 const panel = document.getElementById('panel');
 
 const FLAG_TEXT = {
@@ -111,18 +111,38 @@ document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('cli
   state.tab = b.dataset.tab; render();
 }));
 document.getElementById('client').addEventListener('change', (e) => { state.clientId = Number(e.target.value); refresh(); });
+document.querySelectorAll('.nav-switch button').forEach((b) => b.addEventListener('click', () => setArea(b.dataset.area)));
+
+function setArea(area, tab) {
+  state.area = area;
+  document.querySelectorAll('.nav-switch button').forEach((x) => x.classList.toggle('on', x.dataset.area === area));
+  document.getElementById('ws-area').hidden = area !== 'workspace';
+  document.getElementById('client-pick').hidden = area !== 'workspace';
+  document.getElementById('admin-area').hidden = area !== 'admin';
+  state.tab = tab || (area === 'admin' ? 'clients' : 'review');
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === state.tab));
+  refresh();
+}
+
+async function loadClients(selectId) {
+  state.clients = await api('/api/staff/clients');
+  const sel = document.getElementById('client');
+  sel.replaceChildren(...state.clients.map((c) => h('option', { value: c.id }, `${c.name}${c.pilot ? ' (pilot)' : ''}`)));
+  if (selectId) state.clientId = selectId;
+  if (!state.clients.some((c) => c.id === state.clientId)) state.clientId = state.clients[0] ? state.clients[0].id : null;
+  if (state.clientId) sel.value = String(state.clientId);
+}
 
 async function init() {
   const me = await api('/api/me');
   if (me.user.role !== 'staff') { location.href = '/client'; return; }
-  state.clients = await api('/api/staff/clients');
-  const sel = document.getElementById('client');
-  sel.replaceChildren(...state.clients.map((c) => h('option', { value: c.id }, `${c.name}${c.pilot ? ' (pilot)' : ''}`)));
-  state.clientId = state.clients[0] && state.clients[0].id;
-  await refresh();
+  state.me = me.user;
+  await loadClients();
+  if (!state.clients.length) setArea('admin', 'clients'); else await refresh();
 }
 
 async function refresh() {
+  if (state.area !== 'workspace' || !state.clientId) { state.overview = null; return render(); }
   state.overview = await api(`/api/staff/clients/${state.clientId}/overview`);
   const b = state.overview.balance;
   const s = (label, v, cls) => h('div', { class: `stat ${cls || ''}` }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, String(v)));
@@ -138,7 +158,7 @@ async function act(fn, okMsg) {
 }
 
 async function render() {
-  const fn = { menu: renderMenu, review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
+  const fn = { clients: renderClients, team: renderTeam, menu: renderMenu, review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
   panel.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
   try { panel.replaceChildren(await fn()); } catch (e) { panel.replaceChildren(h('p', { class: 'error' }, e.message)); }
 }
@@ -421,13 +441,155 @@ async function renderPreview() {
     h('div', { class: 'preview-frame' }, renderClientView(v)));
 }
 
+// ------------------------------------------------------------------ shared: one-time setup link
+function linkCard(who, r) {
+  const input = h('input', { value: r.link, readonly: true, 'aria-label': 'Setup link' });
+  return h('div', { class: 'card warn' },
+    h('strong', {}, `Send this link to ${who}`),
+    h('p', { class: 'small' }, `They open it, choose their own password, then sign in. It works once and expires ${fmtDate(r.expires_at)}. Copy it now: for security it isn't shown again (you can always make a new one).`),
+    h('div', { class: 'invite-link' }, input, h('button', { class: 'primary', onclick: async () => {
+      input.select();
+      try { await navigator.clipboard.writeText(r.link); } catch { document.execCommand('copy'); }
+      toast('Link copied');
+    } }, 'Copy link')));
+}
+const STATUS_TEXT = { active: 'Active', invited: 'Invite sent', invite_expired: 'Link expired' };
+
+// ------------------------------------------------------------------ admin: clients
+async function renderClients() {
+  const [clients, menus] = await Promise.all([api('/api/staff/clients-admin'), api('/api/staff/menus')]);
+  const open = (id, tab) => { state.clientId = id; document.getElementById('client').value = String(id); setArea('workspace', tab); };
+
+  const list = clients.length ? h('div', { class: 'table-wrap' }, h('table', {},
+    h('thead', {}, h('tr', {}, ['Client', 'Contract term', 'Allocated', 'Menu', 'Setup', ''].map((t) => h('th', {}, t)))),
+    h('tbody', {}, clients.map((c) => {
+      const todo = [
+        !c.opening_reconciled_at && 'import opening balance',
+        !c.sources && 'add ClickUp/email sources',
+        !c.logins && 'add client logins',
+        !c.portal_enabled && 'turn on access',
+      ].filter(Boolean);
+      return h('tr', {},
+        h('td', {}, h('strong', {}, c.name), c.aliases.length ? h('div', { class: 'muted small' }, `Also known as: ${c.aliases.join(', ')}`) : null),
+        h('td', {}, `${fmtDate(c.term_start)} – ${fmtDate(c.term_end)}`),
+        h('td', { class: 'num' }, `${c.allocated} pts`), h('td', {}, c.menu_code || '—'),
+        h('td', { class: 'small' }, todo.length ? h('span', { class: 'status invited' }, `To do: ${todo.join(', ')}`) : h('span', { class: 'status active' }, 'Live')),
+        h('td', { class: 'row-actions' },
+          h('button', { class: 'secondary', onclick: () => open(c.id, 'review') }, 'Open'),
+          h('button', { onclick: () => editClient(c) }, 'Edit')));
+    })))) : h('div', { class: 'empty' }, h('p', {}, 'No clients yet. Add your first one below.'));
+
+  // Add-client form
+  const f = (name, attrs = {}) => h('input', { name, ...attrs });
+  const menuSel = h('select', { name: 'menuVersionId', required: true }, menus.length
+    ? menus.map((m) => h('option', { value: m.id }, `${m.code} · ${m.name}`))
+    : h('option', { value: '' }, 'Create a service menu first (Service menu tab)'));
+  const tracker = h('input', { type: 'checkbox', name: 'fromTracker' });
+  const trackerFields = h('div', { class: 'form-grid', hidden: true },
+    h('label', {}, 'Balance as of (date)', f('openingDate', { type: 'date' })),
+    h('label', {}, 'Points already used', f('openingUsed', { type: 'number', min: '0', step: '1', value: '0' })),
+    h('label', {}, 'Points committed (approved, not done)', f('openingCommitted', { type: 'number', min: '0', step: '1', value: '0' })));
+  tracker.addEventListener('change', () => { trackerFields.hidden = !tracker.checked; });
+  const form = h('form', { class: 'card' },
+    h('h2', {}, 'Add a client'),
+    h('div', { class: 'form-section' }, 'Client'),
+    h('div', { class: 'form-grid' },
+      h('label', {}, 'Client name', f('name', { required: true, placeholder: 'e.g. Harbor Point Logistics' })),
+      h('label', {}, 'Other names they go by (optional, comma-separated)', f('aliases', { placeholder: 'e.g. Harbor Point, HPL' }))),
+    h('div', { class: 'form-section' }, 'Contract (from the signed agreement)'),
+    h('div', { class: 'form-grid' },
+      h('label', {}, 'Term starts', f('termStart', { type: 'date', required: true })),
+      h('label', {}, 'Term ends', f('termEnd', { type: 'date', required: true })),
+      h('label', {}, 'Service menu', menuSel),
+      h('label', {}, 'Agreement reference', f('agreementRef', { required: true, placeholder: 'e.g. Services Agreement signed 2026-03-18' }))),
+    h('div', { class: 'form-section' }, 'Points and hours'),
+    h('div', { class: 'form-grid' },
+      h('label', {}, 'Points allocated', f('basePoints', { type: 'number', min: '0', step: '1', required: true })),
+      h('label', {}, 'Bonus points (optional)', f('bonusPoints', { type: 'number', min: '0', step: '1', value: '0' })),
+      h('label', {}, 'HubSpot support hours bank (optional)', f('supportHours', { type: 'number', min: '0', step: '0.5', value: '0' }))),
+    h('label', { class: 'check' }, tracker, 'This client already has history in our old tracker'),
+    h('p', { class: 'muted small' }, 'Leave unchecked for a brand-new client: they start at zero used. If checked, enter the reconciled totals from the tracker; then import the tracker file on the Import tab (tick "reconciled opening balance") and the app checks it matches.'),
+    trackerFields,
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add client')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (!tracker.checked) { delete data.openingUsed; delete data.openingCommitted; delete data.openingDate; }
+    try {
+      const r = await api('/api/staff/clients', data);
+      await loadClients(r.id);
+      toast(`${data.name} added. Next: add their ClickUp lists and email domain.`);
+      setArea('workspace', r.needs_opening_import ? 'entry' : 'sources');
+    } catch (ex) { toast(ex.message, 'error'); }
+  });
+
+  return h('div', {}, h('section', { class: 'card' }, h('h2', {}, `Clients (${clients.length})`), list), form);
+}
+
+function editClient(c) {
+  const dlg = h('dialog', { class: 'add-points' });
+  const close = () => { dlg.close(); dlg.remove(); };
+  const name = h('input', { value: c.name, required: true }); const aliases = h('input', { value: c.aliases.join(', ') });
+  const ts = h('input', { type: 'date', value: c.term_start }); const te = h('input', { type: 'date', value: c.term_end });
+  const ref = h('input', { value: c.agreement_ref || '' });
+  const form = h('form', { class: 'dlg-body' },
+    h('label', {}, 'Client name', name), h('label', {}, 'Other names they go by (comma-separated)', aliases),
+    h('div', { class: 'row' }, h('label', {}, 'Term starts', ts), h('label', {}, 'Term ends', te)),
+    h('label', {}, 'Agreement reference', ref),
+    h('p', { class: 'muted small' }, 'To change points, use "+ Add points → Add to allocation" in the client workspace. To change their menu, use the Service menu tab.'),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Save'), h('button', { type: 'button', onclick: close }, 'Cancel')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/api/staff/clients/${c.id}`, { name: name.value, aliases: aliases.value, termStart: ts.value, termEnd: te.value, agreementRef: ref.value });
+      close(); await loadClients(); toast('Client updated'); render();
+    } catch (ex) { toast(ex.message, 'error'); }
+  });
+  dlg.append(h('div', { class: 'dlg-head' }, h('h2', {}, `Edit ${c.name}`), h('button', { type: 'button', onclick: close }, 'Close')), form);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  document.body.append(dlg); dlg.showModal();
+}
+
+// ------------------------------------------------------------------ admin: LeadG2 team
+async function renderTeam() {
+  const { me, members } = await api('/api/staff/team');
+  const linkBox = h('div', {});
+  if (state.pendingLink) { linkBox.append(linkCard(state.pendingLink.who, state.pendingLink.r)); state.pendingLink = null; }
+  const name = h('input', { required: true, placeholder: 'e.g. Jordan Smith' });
+  const email = h('input', { type: 'email', required: true, placeholder: 'jordan@leadg2.com' });
+  const form = h('form', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Work email', email),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add team member & get link')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { const r = await api('/api/staff/team', { name: name.value, email: email.value }); state.pendingLink = { who: name.value, r }; render(); }
+    catch (ex) { toast(ex.message, 'error'); }
+  });
+  return h('section', { class: 'card' },
+    h('h2', {}, 'LeadG2 team'),
+    h('p', { class: 'muted small' }, 'Team members can see every client, review and approve points, edit the menu, and manage clients and other team members. Clients never see this area.'),
+    h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Name', 'Email', 'Status', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, members.map((u) => h('tr', {},
+        h('td', {}, u.name, u.id === me ? h('span', { class: 'muted small' }, ' (you)') : null), h('td', {}, u.email),
+        h('td', {}, h('span', { class: `status ${u.status}` }, STATUS_TEXT[u.status])),
+        h('td', { class: 'row-actions' },
+          h('button', { onclick: async () => {
+            try { linkBox.replaceChildren(linkCard(u.name, await api(`/api/staff/team/${u.id}/link`, {}))); } catch (ex) { toast(ex.message, 'error'); }
+          } }, u.status === 'active' ? 'Password reset link' : 'New link'),
+          u.id === me ? null : h('button', { class: 'danger', onclick: () => {
+            if (!confirm(`Remove ${u.name}? They will be signed out immediately and lose access.`)) return;
+            act(() => api(`/api/staff/team/${u.id}/remove`, {}), 'Team member removed');
+          } }, 'Remove'))))))),
+    linkBox, h('h3', {}, 'Add a team member'), form);
+}
+
 // ------------------------------------------------------------------ service menu editor
 async function renderMenu() {
   const menus = await api('/api/staff/menus');
-  const clientVersionId = state.overview.contract.menu_version_id;
-  if (!menus.some((m) => m.id === state.menuId)) state.menuId = clientVersionId;
+  if (!menus.length) return renderFirstMenu();
+  if (!menus.some((m) => m.id === state.menuId)) state.menuId = menus[0].id;
   const v = menus.find((m) => m.id === state.menuId) || menus[0];
-  const clientName = state.overview.client.name;
+  const assignSel = h('select', {}, state.clients.map((c) => h('option', { value: c.id }, c.name)));
   const range = (i) => (i.points_min === i.points_max ? `${i.points_min}` : `${i.points_min}–${i.points_max}`);
 
   const picker = h('select', { onchange: (e) => { state.menuId = Number(e.target.value); render(); } },
@@ -437,15 +599,17 @@ async function renderMenu() {
   const vName = h('input', { value: v.name }); const vDate = h('input', { type: 'date', value: v.effective_date });
   const details = h('section', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', {}, `Menu ${v.code}`),
-      v.id === clientVersionId ? h('span', { class: 'badge st-committed' }, `${clientName} uses this menu`)
-        : h('button', { class: 'secondary', onclick: () => {
-          if (!confirm(`Switch ${clientName} to menu ${v.code}?\n\nNew suggestions and entries will use these prices. Work already approved keeps its original points.`)) return;
-          act(() => api(`/api/staff/clients/${state.clientId}/menu`, { versionId: v.id }), `${clientName} now uses ${v.code}`);
-        } }, `Use this menu for ${clientName}`)),
+      h('span', { class: 'muted small' }, v.clients.length ? `Used by ${v.clients.map((c) => c.name).join(', ')}` : 'Not used by any client yet')),
     h('div', { class: 'hint' }, 'Editing a menu never changes points already approved: each approved item keeps the amount it was approved at. Changes apply to new suggestions and entries. Every change is recorded in the audit log.'),
     h('div', { class: 'row' }, h('label', {}, 'Menu name', vName), h('label', {}, 'Takes effect', vDate),
       h('div', { class: 'actions' }, h('button', { onclick: () => act(() => api(`/api/staff/menus/${v.id}`, { name: vName.value, effectiveDate: vDate.value }), 'Menu details saved') }, 'Save details'))),
-    h('p', { class: 'muted small' }, `${v.items.length} items · ${v.approved_work_items} approved work items reference this version`));
+    h('p', { class: 'muted small' }, `${v.items.length} items · ${v.approved_work_items} approved work items reference this version`),
+    state.clients.length ? h('div', { class: 'row' }, h('label', {}, 'Switch a client to this menu', assignSel),
+      h('div', { class: 'actions' }, h('button', { class: 'secondary', onclick: () => {
+        const c = state.clients.find((x) => x.id === Number(assignSel.value));
+        if (!confirm(`Switch ${c.name} to menu ${v.code}?\n\nNew suggestions and entries will use these prices. Work already approved keeps its original points.`)) return;
+        act(async () => { await api(`/api/staff/clients/${c.id}/menu`, { versionId: v.id }); }, `${c.name} now uses ${v.code}`);
+      } }, 'Use this menu'))) : null);
 
   // Items table
   const itemRow = (i) => {
@@ -486,6 +650,16 @@ async function renderMenu() {
     }, 'New menu version created') }, 'Create version')));
 
   return h('div', {}, h('div', { class: 'card' }, h('label', {}, 'Menu version', picker)), details, items, newVersion);
+}
+
+function renderFirstMenu() {
+  const code = h('input', { placeholder: 'e.g. 2026.1', required: true }); const date = h('input', { type: 'date', required: true });
+  return h('section', { class: 'card' }, h('h2', {}, 'Create your service menu'),
+    h('p', { class: 'muted small' }, 'Every client contract uses a menu version. Create one, then add its items.'),
+    h('div', { class: 'row' }, h('label', {}, 'Version label', code), h('label', {}, 'Takes effect', date)),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(async () => {
+      state.menuId = (await api('/api/staff/menus', { code: code.value, effectiveDate: date.value })).id;
+    }, 'Menu created') }, 'Create menu')));
 }
 
 async function renderAudit() {

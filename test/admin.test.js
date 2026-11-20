@@ -127,3 +127,66 @@ test('source mappings: add from a pasted ClickUp URL, prevent double-mapping, an
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM source_records WHERE title = 'Carrier partner landing page'`).get().n, 0);
   assert.throws(() => admin.removeMapping(db, { clientId: bb, mappingId: list.id, actor: 't' }), /not found/);
 });
+
+test('LeadG2 team: invite an admin, they set a password, safeguards on removal', async (t) => {
+  const s = await seeded({ sync: false });
+  const srv = await startServer(createApp({ db: s.db, adapters: {} }));
+  t.after(srv.close);
+  const boss = client(srv.base);
+  await boss.login(DEMO_STAFF.email, DEMO_STAFF.password);
+  const add = await boss.post('/api/staff/team', { name: 'Jordan Smith', email: 'jordan@leadg2.example' });
+  assert.equal(add.status, 200);
+  const jordan = client(srv.base);
+  await jordan.post('/api/invite/accept', { token: add.body.link.split('#t=')[1], password: 'jordan-password-1' });
+  const login = await jordan.login('jordan@leadg2.example', 'jordan-password-1');
+  assert.equal(login.body.user.role, 'staff');
+  assert.equal((await jordan.get(`/api/staff/clients/${s.hp}/overview`)).status, 200, 'new admin sees clients');
+
+  const team = (await boss.get('/api/staff/team')).body;
+  const bossId = team.me; const jordanId = team.members.find((m) => m.email === 'jordan@leadg2.example').id;
+  assert.equal((await boss.post(`/api/staff/team/${bossId}/remove`, {})).status, 400, 'cannot remove yourself');
+  assert.equal((await jordan.post(`/api/staff/team/${bossId}/remove`, {})).status, 200);
+  assert.equal((await boss.get('/api/staff/team')).status, 401, 'removed admin is signed out');
+  assert.equal((await jordan.post(`/api/staff/team/${jordanId}/remove`, {})).status, 400, 'last admin cannot be removed');
+
+  // Clients can never reach team management.
+  s.db.prepare('UPDATE clients SET portal_enabled = 1').run();
+  const dana = client(srv.base);
+  await dana.login('dana@harborpoint.example', 'demo-client');
+  assert.equal((await dana.get('/api/staff/team')).status, 403);
+  assert.equal((await dana.post('/api/staff/team', { name: 'Evil', email: 'evil@x.com' })).status, 403);
+  assert.equal((await dana.post('/api/staff/clients', { name: 'X' })).status, 403);
+});
+
+test('adding a brand-new client: starts at zero, ready to use', async () => {
+  const { db } = await seeded({ sync: false });
+  const menu = db.prepare(`SELECT id FROM menu_versions WHERE code = '2026.1'`).get().id;
+  const base = { name: 'Northwind Foods', aliases: 'Northwind, NWF', termStart: '2026-12-01', termEnd: '2027-11-30', menuVersionId: menu,
+    agreementRef: 'Northwind Services Agreement (signed 2026-11-15)', basePoints: 150, bonusPoints: 10, supportHours: 5, actor: 'emily@leadg2.example' };
+  assert.throws(() => admin.createClient(db, { ...base, agreementRef: '' }), /agreement/);
+  assert.throws(() => admin.createClient(db, { ...base, termEnd: '2026-01-01' }), /end after start/);
+  const r = admin.createClient(db, base);
+  assert.equal(r.needs_opening_import, false);
+  const b = ledger.balance(db, r.id);
+  assert.deepEqual([b.allocated, b.used, b.committed, b.available], [160, 0, 0, 160]);
+  assert.equal(ledger.supportHours(db, r.id).hours_purchased, 5);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT aliases FROM clients WHERE id = ?').get(r.id).aliases), ['Northwind', 'NWF']);
+  assert.throws(() => admin.createClient(db, base), /already exists/);
+  admin.updateClient(db, { clientId: r.id, name: 'Northwind Foods Inc.', termEnd: '2027-12-31', actor: 't' });
+  assert.equal(ledger.balance(db, r.id).term_end, '2027-12-31');
+});
+
+test('adding a client with tracker history: totals must reconcile on import', async () => {
+  const { db } = await seeded({ sync: false });
+  const importer = require('../src/importer');
+  const menu = db.prepare(`SELECT id FROM menu_versions WHERE code = '2026.1'`).get().id;
+  const r = admin.createClient(db, { name: 'Acme Freight', termStart: '2026-01-01', termEnd: '2026-12-31', menuVersionId: menu, agreementRef: 'Acme SA-2026',
+    basePoints: 100, openingDate: '2026-11-01', openingUsed: 10, openingCommitted: 4, actor: 't' });
+  assert.equal(r.needs_opening_import, true);
+  const csv = 'tracker_id,date,title,client_summary,menu_code,points,status\nA-1,2026-05-01,Training,Ran a training,TRAIN,4,used\n';
+  assert.throws(() => importer.importTracker(db, { clientId: r.id, csv, actor: 't', opening: true }), /does not reconcile/);
+  const good = 'tracker_id,date,title,client_summary,menu_code,points,status\nA-1,2026-05-01,Landing page,Built a landing page,LP-BUILD,10,used\nA-2,2026-10-20,Training,Training session,TRAIN,4,committed\n';
+  importer.importTracker(db, { clientId: r.id, csv: good, actor: 't', opening: true });
+  const b = ledger.balance(db, r.id);
+  assert.deepEqual([b.allocated, b.used, b.committed, b.available], [100, 10, 4, 86]);
+});

@@ -180,5 +180,128 @@ function removeMapping(db, { clientId, mappingId, actor }) {
   audit(db, { clientId, actor, action: 'mapping.remove', entity: 'source_mapping', entityId: Number(mappingId), detail: { source_type: m.source_type, value: m.value } });
 }
 
-module.exports = { listMenus, createMenuVersion, updateMenuVersion, saveMenuItem, deleteMenuItem, assignMenu,
+// ------------------------------------------------------------------ LeadG2 team (staff admins)
+function listStaff(db) {
+  return db.prepare(`SELECT u.id, u.email, u.name, u.password_set,
+      (SELECT MAX(expires_at) FROM invites i WHERE i.user_id = u.id AND i.used_at IS NULL) AS invite_expires_at
+    FROM users u WHERE u.role = 'staff' ORDER BY u.name`).all()
+    .map((u) => ({ ...u, status: u.password_set ? 'active' : (u.invite_expires_at && u.invite_expires_at > new Date().toISOString() ? 'invited' : 'invite_expired') }));
+}
+
+/** Add a LeadG2 team member. They get a one-time link to choose their own password. */
+function inviteStaff(db, { email, name, actor }) {
+  email = String(email || '').trim().toLowerCase(); name = String(name || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new AppError(400, 'Enter a valid email address');
+  if (!name) throw new AppError(400, 'Enter the person\'s name');
+  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) throw new AppError(409, 'This email already has an account');
+  return tx(db, () => {
+    const userId = auth.createUser(db, { email, name, role: 'staff', password: crypto.randomBytes(32).toString('hex') });
+    db.prepare('UPDATE users SET password_set = 0 WHERE id = ?').run(userId);
+    const inv = auth.createInvite(db, { userId, actor });
+    audit(db, { actor, action: 'staff.invite', entity: 'user', entityId: userId, detail: { email } });
+    return { userId, ...inv };
+  });
+}
+
+function staffUser(db, userId) {
+  const u = db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'staff'`).get(userId);
+  if (!u) throw new AppError(404, 'Team member not found');
+  return u;
+}
+
+function newStaffLink(db, { userId, actor }) {
+  const u = staffUser(db, userId);
+  const inv = auth.createInvite(db, { userId: u.id, actor });
+  audit(db, { actor, action: u.password_set ? 'staff.reset_link' : 'staff.reinvite', entity: 'user', entityId: u.id });
+  return inv;
+}
+
+function removeStaff(db, { userId, actorId, actor }) {
+  const u = staffUser(db, userId);
+  if (u.id === actorId) throw new AppError(400, 'You cannot remove yourself. Ask another admin.');
+  const others = db.prepare(`SELECT COUNT(*) n FROM users WHERE role = 'staff' AND password_set = 1 AND id != ?`).get(u.id).n;
+  if (!others) throw new AppError(400, 'At least one active admin must remain');
+  tx(db, () => {
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
+    db.prepare('DELETE FROM invites WHERE user_id = ?').run(u.id);
+    db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+    audit(db, { actor, action: 'staff.remove', entity: 'user', entityId: u.id, detail: { email: u.email } });
+  });
+}
+
+// ------------------------------------------------------------------ clients (customers)
+const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+const slugify = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'client';
+
+/**
+ * Add a customer with their contract. The allocation must reference the signed agreement.
+ * New customers start at zero. Customers moving over from the old tracker get their opening
+ * totals recorded here and then reconciled by importing the tracker file (Import tab).
+ */
+function createClient(db, p) {
+  const name = String(p.name || '').trim();
+  if (!name) throw new AppError(400, 'Enter the client\'s name');
+  if (!isDate(p.termStart) || !isDate(p.termEnd) || p.termEnd <= p.termStart) throw new AppError(400, 'Enter the contract start and end dates (end after start)');
+  const base = Number(p.basePoints);
+  if (!Number.isInteger(base) || base < 0) throw new AppError(400, 'Allocated points must be a whole number');
+  if (!String(p.agreementRef || '').trim()) throw new AppError(400, 'Reference the signed agreement (the source of truth for the allocation)');
+  getVersion(db, Number(p.menuVersionId));
+  if (db.prepare('SELECT 1 FROM clients WHERE lower(name) = lower(?)').get(name)) throw new AppError(409, 'A client with this name already exists');
+  const bonus = Number(p.bonusPoints || 0); const hours = Number(p.supportHours || 0);
+  const used = Number(p.openingUsed || 0); const committed = Number(p.openingCommitted || 0);
+  if (![bonus, used, committed].every((n) => Number.isInteger(n) && n >= 0) || !(hours >= 0)) throw new AppError(400, 'Numbers must be zero or more');
+  const fromTracker = used > 0 || committed > 0;
+  const openingDate = p.openingDate || p.termStart;
+  if (!isDate(openingDate)) throw new AppError(400, 'Invalid opening balance date');
+  const aliases = String(p.aliases || '').split(',').map((a) => a.trim()).filter(Boolean);
+
+  return tx(db, () => {
+    let slug = slugify(name); let n = 2;
+    while (db.prepare('SELECT 1 FROM clients WHERE slug = ?').get(slug)) slug = `${slugify(name)}-${n++}`;
+    const cid = Number(db.prepare('INSERT INTO clients (slug, name, aliases) VALUES (?,?,?)').run(slug, name, JSON.stringify(aliases)).lastInsertRowid);
+    const kid = Number(db.prepare(`INSERT INTO contracts (client_id, term_start, term_end, menu_version_id, agreement_ref, opening_balance_date, opening_used, opening_committed, opening_reconciled_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(cid, p.termStart, p.termEnd, Number(p.menuVersionId), String(p.agreementRef).trim(), openingDate, used, committed,
+      fromTracker ? null : new Date().toISOString()).lastInsertRowid);
+    const addAlloc = db.prepare('INSERT INTO allocations (contract_id, kind, points, source_ref, verified_by) VALUES (?,?,?,?,?)');
+    if (base > 0) addAlloc.run(kid, 'base', base, String(p.agreementRef).trim(), p.actor);
+    if (bonus > 0) addAlloc.run(kid, 'bonus', bonus, String(p.bonusRef || p.agreementRef).trim(), p.actor);
+    if (hours > 0) {
+      db.prepare('INSERT INTO support_hour_banks (client_id, hours_purchased, source_ref, term_start, term_end) VALUES (?,?,?,?,?)')
+        .run(cid, hours, String(p.supportRef || p.agreementRef).trim(), p.termStart, p.termEnd);
+    }
+    audit(db, { clientId: cid, actor: p.actor, action: 'client.create', entity: 'client', entityId: cid,
+      detail: { name, term: [p.termStart, p.termEnd], base, bonus, support_hours: hours, opening: fromTracker ? { used, committed, date: openingDate } : null } });
+    return { id: cid, slug, needs_opening_import: fromTracker };
+  });
+}
+
+function updateClient(db, { clientId, name, aliases, termStart, termEnd, agreementRef, actor }) {
+  const c = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
+  if (!c) throw new AppError(404, 'Client not found');
+  const k = db.prepare('SELECT * FROM contracts WHERE client_id = ? AND active = 1 ORDER BY id DESC LIMIT 1').get(clientId);
+  const ts = termStart || k.term_start; const te = termEnd || k.term_end;
+  if (!isDate(ts) || !isDate(te) || te <= ts) throw new AppError(400, 'Contract end must be after the start');
+  if (name && name.trim() !== c.name && db.prepare('SELECT 1 FROM clients WHERE lower(name) = lower(?) AND id != ?').get(name.trim(), clientId)) {
+    throw new AppError(409, 'Another client already has this name');
+  }
+  tx(db, () => {
+    db.prepare('UPDATE clients SET name = COALESCE(?, name), aliases = COALESCE(?, aliases) WHERE id = ?').run(
+      name ? name.trim() : null, aliases == null ? null : JSON.stringify(String(aliases).split(',').map((a) => a.trim()).filter(Boolean)), clientId);
+    db.prepare('UPDATE contracts SET term_start = ?, term_end = ?, agreement_ref = COALESCE(?, agreement_ref) WHERE id = ?').run(ts, te, agreementRef || null, k.id);
+    audit(db, { clientId, actor, action: 'client.update', entity: 'client', entityId: clientId,
+      detail: { from: { name: c.name, term: [k.term_start, k.term_end] }, to: { name, term: [ts, te] } } });
+  });
+}
+
+function listClientsAdmin(db) {
+  return db.prepare(`SELECT c.id, c.name, c.slug, c.aliases, c.portal_enabled, c.pilot, k.term_start, k.term_end, k.agreement_ref,
+      k.opening_used, k.opening_committed, k.opening_reconciled_at, v.code AS menu_code,
+      (SELECT COALESCE(SUM(points),0) FROM allocations a WHERE a.contract_id = k.id) AS allocated,
+      (SELECT COUNT(*) FROM users u WHERE u.client_id = c.id) AS logins,
+      (SELECT COUNT(*) FROM source_mappings m WHERE m.client_id = c.id) AS sources
+    FROM clients c LEFT JOIN contracts k ON k.client_id = c.id AND k.active = 1 LEFT JOIN menu_versions v ON v.id = k.menu_version_id
+    ORDER BY c.pilot DESC, c.name`).all().map((c) => ({ ...c, aliases: JSON.parse(c.aliases) }));
+}
+
+module.exports = { listStaff, inviteStaff, newStaffLink, removeStaff, createClient, updateClient, listClientsAdmin, listMenus, createMenuVersion, updateMenuVersion, saveMenuItem, deleteMenuItem, assignMenu,
   listClientUsers, inviteClientUser, newClientLink, removeClientUser, addMapping, removeMapping };

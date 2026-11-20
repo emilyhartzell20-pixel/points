@@ -12,22 +12,37 @@
 <body>
   <nav class="topbar">
     <a class="brand" href="/"><img class="brand-logo" src="/static/brand/logo-white.png" alt="LeadG2" hidden><span class="brand-word">LEADG2</span><span class="brand-tag">Service Points · Internal</span></a>
-    <label class="client-pick">Client <select id="client"></select></label>
+    <div class="seg nav-switch" role="tablist" aria-label="Area">
+      <button type="button" data-area="workspace" class="on">Client workspace</button>
+      <button type="button" data-area="admin">Admin</button>
+    </div>
+    <label class="client-pick" id="client-pick">Client <select id="client"></select></label>
     <button id="logout" class="ghost">Sign out</button>
   </nav>
   <div class="wrap">
-    <section id="balance" class="stats compact" aria-label="Balance"></section>
-    <div class="toolbar">
-      <div class="tabs" role="tablist">
-        <button data-tab="review" class="active">Review queue <span id="qcount" class="pill"></span></button>
-        <button data-tab="ledger">Ledger</button>
-        <button data-tab="menu">Service menu</button>
-        <button data-tab="entry">Import</button>
-        <button data-tab="sources">Sources &amp; sync</button>
-        <button data-tab="preview">Client access</button>
-        <button data-tab="audit">Audit log</button>
+    <div id="ws-area">
+      <section id="balance" class="stats compact" aria-label="Balance"></section>
+      <div class="toolbar">
+        <div class="tabs" role="tablist">
+          <button data-tab="review" class="active">Review queue <span id="qcount" class="pill"></span></button>
+          <button data-tab="ledger">Ledger</button>
+          <button data-tab="entry">Import</button>
+          <button data-tab="sources">Sources &amp; sync</button>
+          <button data-tab="preview">Client access</button>
+          <button data-tab="audit">Audit log</button>
+        </div>
+        <button id="add-points" class="primary">+ Add points</button>
       </div>
-      <button id="add-points" class="primary">+ Add points</button>
+    </div>
+    <div id="admin-area" hidden>
+      <h1 class="area-title">Admin</h1>
+      <div class="toolbar">
+        <div class="tabs" role="tablist">
+          <button data-tab="clients">Clients</button>
+          <button data-tab="team">LeadG2 team</button>
+          <button data-tab="menu">Service menu</button>
+        </div>
+      </div>
     </div>
     <main id="panel"></main>
   </div>
