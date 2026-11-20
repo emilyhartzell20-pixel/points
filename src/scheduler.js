@@ -5,6 +5,8 @@ const ingest = require('./ingest');
 const SOURCE_TYPES = { clickup: ['clickup_list', 'clickup_space'], outlook: ['email_domain', 'email_address'] };
 
 async function syncEverything(db, adapters, log = console) {
+  // Hours trackers (calls & training logs) are re-read straight into the ledger; new calls are added.
+  await ingest.refreshHoursTrackers(db, adapters.clickup, log);
   for (const [source, types] of Object.entries(SOURCE_TYPES)) {
     const adapter = adapters[source];
     if (!adapter || adapter.mode !== 'live') continue;

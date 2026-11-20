@@ -730,11 +730,11 @@ function renderFinder() {
     btn.disabled = true; btn.textContent = 'Scanning ClickUp…';
     try {
       const found = await api('/api/staff/clickup/trackers');
-      if (!found.length) { box.replaceChildren(h('p', { class: 'muted' }, 'No tracker lists found. Lists are recognized by names like "Service Point Tracking" or "Point Tracker".')); return; }
+      if (!found.length) { box.replaceChildren(h('p', { class: 'muted' }, 'No tracker lists found. Lists are recognized by names like "Service Point Tracking", "Point Tracker" or "Call & Training Tracking".')); return; }
       const rows = found.map((f) => {
         const pick = h('input', { type: 'checkbox', checked: f.status !== 'linked', 'aria-label': `Include ${f.client_name}` });
         const name = h('input', { value: f.client_name, 'aria-label': 'Client name', disabled: f.status === 'linked' });
-        const alloc = h('input', { type: 'number', min: '0', step: '1', value: f.allocation ?? '', placeholder: '?', class: 'pts-in', 'aria-label': 'Points allocated', disabled: f.status === 'linked' });
+        const alloc = h('input', { type: 'number', min: '0', step: f.kind === 'hours' ? '0.25' : '1', value: f.allocation ?? '', placeholder: f.kind === 'hours' ? 'auto' : '?', title: f.kind === 'hours' ? 'Leave blank to use the tracker\'s CONTRACT ALLOCATION rows' : null, class: 'pts-in', 'aria-label': f.kind === 'hours' ? 'Hours allocated' : 'Points allocated', disabled: f.status === 'linked' });
         const ts = h('input', { type: 'date', 'aria-label': 'Term starts', disabled: f.status !== 'new' }); const te = h('input', { type: 'date', 'aria-label': 'Term ends', disabled: f.status !== 'new' });
         const cal = f.calendar && !f.calendar.linked ? h('input', { type: 'checkbox', checked: true, 'aria-label': `Show ${f.calendar.name}` }) : null;
         const col = f.collaboration && !f.collaboration.linked ? h('input', { type: 'checkbox', checked: true, 'aria-label': `Show ${f.collaboration.name}` }) : null;
@@ -743,7 +743,7 @@ function renderFinder() {
       });
       const go = h('button', { class: 'primary', onclick: async () => {
         const items = rows.filter((r) => r.pick.checked).map((r) => ({ listId: r.f.list_id, listName: r.f.list_name, name: r.name.value,
-          allocation: r.f.status === 'linked' || r.alloc.value === '' ? null : Number(r.alloc.value), termStart: r.ts.value || null, termEnd: r.te.value || null,
+          kind: r.f.kind, allocation: r.f.status === 'linked' || r.alloc.value === '' ? null : Number(r.alloc.value), termStart: r.ts.value || null, termEnd: r.te.value || null,
           calendarListId: r.cal && r.cal.checked ? r.f.calendar.id : null, collabListId: r.col && r.col.checked ? r.f.collaboration.id : null }));
         if (!items.length) return toast('Tick at least one tracker', 'error');
         if (!confirm(`Set up ${items.length} client(s) from ClickUp? Each tracker is read and loaded (Completed = used, In Progress = committed, the rest = planned). Safe to run again.`)) return;
@@ -754,7 +754,7 @@ function renderFinder() {
             h('tbody', {}, results.map((r) => h('tr', {}, h('td', {}, h('strong', {}, r.name || r.listId)),
               h('td', { class: 'small' }, r.error ? h('span', { class: 'error' }, r.error)
                 : `${r.created ? 'Created' : 'Updated'} · ${r.found} items found, ${r.added} added${r.term ? ` · term ${fmtDate(r.term.term_start)} – ${fmtDate(r.term.term_end)} (from ${r.term.from})` : ''}${r.linked_feeds && r.linked_feeds.length ? ` · now showing ${r.linked_feeds.map((k) => (k === 'calendar' ? 'editorial calendar' : 'approvals')).join(' + ')}` : ''}${r.warning ? ` · ⚠ ${r.warning}` : ''}`),
-              ...(r.balance ? [r.balance.allocated, r.balance.used, r.balance.committed, r.balance.forecast, r.balance.available].map((n) => h('td', { class: 'num' }, String(n))) : [h('td', { colspan: 5 })]))))),
+              ...(r.balance ? [r.balance.allocated, r.balance.used, r.balance.committed, r.balance.forecast, r.balance.available].map((n) => h('td', { class: 'num' }, `${num(n)}${r.unit === 'hours' ? ' h' : ''}`)) : [h('td', { colspan: 5 })]))))),
             h('p', { class: 'muted small' }, 'Check each new client\'s contract term and agreement reference under Edit, then add their logins on Client access.'));
           await loadClients();
           toast('Import finished');
@@ -763,8 +763,8 @@ function renderFinder() {
       box.replaceChildren(
         h('p', { class: 'muted small' }, `Found ${found.length} tracker list(s). Points come from the list name; leave the term blank to work it out from the tracker's month headings. Two trackers with the same client name become one client, and the second tracker's points are added to its allocation; rename one row to keep them separate.`),
         h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
-          h('thead', {}, h('tr', {}, ['', 'Client', 'ClickUp tracker', 'Also show the client', 'Points', 'Term starts', 'Term ends', 'Status'].map((t) => h('th', {}, t)))),
-          h('tbody', {}, rows.map((r) => h('tr', {}, h('td', {}, r.pick), h('td', {}, r.name), h('td', { class: 'small' }, r.f.list_name),
+          h('thead', {}, h('tr', {}, ['', 'Client', 'ClickUp tracker', 'Also show the client', 'Points / hours', 'Term starts', 'Term ends', 'Status'].map((t) => h('th', {}, t)))),
+          h('tbody', {}, rows.map((r) => h('tr', {}, h('td', {}, r.pick), h('td', {}, r.name), h('td', { class: 'small' }, r.f.list_name, ' ', h('span', { class: `status ${r.f.kind === 'hours' ? 'invited' : 'active'}` }, r.f.kind === 'hours' ? 'Hours' : 'Points')),
             h('td', { class: 'small' },
               r.f.calendar ? h('label', { class: 'check' }, r.cal || '✓', ` Calendar: ${r.f.calendar.name}`) : null,
               r.f.collaboration ? h('label', { class: 'check' }, r.col || '✓', ` Approvals: ${r.f.collaboration.name}`) : null,
@@ -777,8 +777,8 @@ function renderFinder() {
   };
   return h('section', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', {}, 'Find clients in ', h('em', {}, 'ClickUp')),
-      h('button', { class: 'secondary', onclick: (e) => scan(e.target) }, 'Scan ClickUp for point trackers')),
-    h('p', { class: 'muted small' }, 'Looks through every ClickUp space for point-tracker lists (templates are skipped), then creates each client and loads its tracker in one step.'),
+      h('button', { class: 'secondary', onclick: (e) => scan(e.target) }, 'Scan ClickUp for point & hours trackers')),
+    h('p', { class: 'muted small' }, 'Looks through every ClickUp space for point-tracker lists and hours trackers (like "Call & Training Tracking"; templates are skipped), then creates each client and loads its tracker in one step. Hours trackers: each call\'s Time Estimate is its length, and "CONTRACT ALLOCATION" rows set the contracted hours.'),
     box);
 }
 

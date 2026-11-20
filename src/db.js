@@ -295,6 +295,8 @@ function migrate(db) {
   if (!has('clients', 'hubspot_synced')) db.exec('ALTER TABLE clients ADD COLUMN hubspot_synced TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS client_pages (client_id INTEGER PRIMARY KEY REFERENCES clients(id), html TEXT, url TEXT,
     file_name TEXT, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS hours_trackers (list_id TEXT PRIMARY KEY, client_id INTEGER NOT NULL REFERENCES clients(id),
+    label TEXT, imported_at TEXT, last_error TEXT)`);
   if (!has('clients', 'unit')) db.exec("ALTER TABLE clients ADD COLUMN unit TEXT NOT NULL DEFAULT 'points'");
   if (!has('invites', 'replaced_at')) db.exec('ALTER TABLE invites ADD COLUMN replaced_at TEXT');
   if (!has('client_feeds', 'scope')) db.exec("ALTER TABLE client_feeds ADD COLUMN scope TEXT NOT NULL DEFAULT 'list'");

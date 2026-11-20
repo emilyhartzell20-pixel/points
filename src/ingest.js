@@ -504,6 +504,16 @@ const TRACKER_STATE = { completed: 'used', approved: 'committed', in_progress: '
 async function importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmpty = false }) {
   const importer = require('./importer');
   if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
+  const hoursLists = db.prepare('SELECT list_id FROM hours_trackers WHERE client_id = ?').all(clientId);
+  if (hoursLists.length) {
+    const sum = { created: 0, skipped: 0, conflicts: [], found: 0 };
+    for (const h of hoursLists) {
+      const r = await importHoursTracker(db, { clientId, listId: h.list_id, adapter, actor });
+      sum.created += r.created; sum.skipped += r.skipped; sum.found += r.found; sum.conflicts.push(...(r.conflicts || []));
+      if (r.not_counted) sum.not_counted = r.not_counted;
+    }
+    return sum;
+  }
   const mappings = mappingsFor(db, clientId).filter((m) => m.source_type.startsWith('clickup') && m.scope === 'points');
   if (!mappings.length) throw Object.assign(new Error('Add the client\'s ClickUp tracker list under "Where the work comes from" first'), { status: 409 });
   const all = await fetchClickUp(adapter, { mappings, aliases: [], since: null });
@@ -529,6 +539,88 @@ async function importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmp
   return { ...result, found: tasks.length, sync };
 }
 
+// ---------------------------------------------------------------- hours trackers (calls & training logs)
+// A list where each call is a task (usually a subtask under a month row) whose ClickUp Time Estimate is its
+// length. "CONTRACT ALLOCATION | <pool>: 15 hrs …" rows give the contracted hours. Month rows with no time
+// are summaries and are skipped, so nothing is counted twice.
+const HOURS_TRACKER_NAME = /(call\s*(?:&|and)\s*training|hours?\s*track|time\s*track|hours?\s*bank|contract\s*vs\.?\s*delivered)/i;
+const quarter = (h) => Math.round(h * 4) / 4;
+const textOf = (t) => String(t.text_content || t.description || '');
+const field = (t, label) => { const m = new RegExp(`${label}:\\s*([^\\n]+)`, 'i').exec(textOf(t)); return m ? m[1].trim() : null; };
+
+function readHoursTracker(tasks, { year }) {
+  const contracts = []; const entries = [];
+  for (const t of tasks) {
+    const name = String(t.name || '').trim();
+    if (/^contract\s*allocation/i.test(name)) {
+      const pool = (/\|\s*([^:|]+):/.exec(name) || [])[1];
+      const n = Number(field(t, 'Contracted')) || Number((/:\s*(\d+(?:\.\d+)?)\s*(?:hrs?|hours|contracted)/i.exec(name) || [])[1]);
+      if (n > 0) contracts.push({ pool: pool ? pool.trim() : 'Hours', hours: n });
+      continue;
+    }
+    if (/^reconciliation/i.test(name)) continue;
+    const hours = quarter((Number(t.time_estimate) || 0) / 3600e3);
+    if (!(hours > 0)) continue; // month summaries and anything without a duration
+    const ms = Number(t.start_date || t.due_date || 0);
+    let date = ms ? new Date(ms).toISOString().slice(0, 10) : null;
+    const md = /^(\d{1,2})[-/](\d{1,2})\s*\|/.exec(name);
+    if (!date && md) date = `${year}-${md[1].padStart(2, '0')}-${md[2].padStart(2, '0')}`;
+    const title = name.replace(/^\d{1,2}[-/]\d{1,2}\s*\|\s*/, '').trim() || name;
+    const pool = field(t, 'Contract pool') || field(t, 'Category') || 'Calls & training';
+    entries.push({ id: String(t.id), date, title, hours, pool: pool.charAt(0).toUpperCase() + pool.slice(1) });
+  }
+  // With contract pools, only calls in those pools draw on the contracted hours ("Virtual rollout sessions"
+  // belongs to "Virtual rollout"); anything else (e.g. "Other project/support activity") is reported, not counted.
+  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  for (const e of entries) {
+    const c = contracts.find((k) => norm(e.pool).includes(norm(k.pool)) || norm(k.pool).includes(norm(e.pool)));
+    e.counted = !contracts.length || !!c;
+    if (c) e.pool = c.pool;
+  }
+  return { contracts, entries, contracted: contracts.reduce((a, c) => a + c.hours, 0) };
+}
+
+/** Load (or top up) one hours tracker into a client's ledger. Safe to run again: known calls are skipped. */
+async function importHoursTracker(db, { clientId, listId, adapter, actor }) {
+  const importer = require('./importer');
+  const ledger = require('./ledger');
+  if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
+  const contract = activeContract(db, clientId);
+  try {
+    const tasks = await adapter.fetchTasks({ mappings: [{ source_type: 'clickup_list', value: String(listId) }], since: null });
+    const { contracts, entries, contracted } = readHoursTracker(tasks, { year: contract.term_start.slice(0, 4) });
+    // The contracted hours become the allocation the first time (only when none is recorded yet).
+    if (contracted > 0 && ledger.balance(db, clientId).allocated === 0) {
+      ledger.addAllocation(db, { clientId, kind: 'base', points: quarter(contracted), actor,
+        sourceRef: `ClickUp "CONTRACT ALLOCATION" rows: ${contracts.map((c) => `${c.pool} ${c.hours}`).join(', ')} (confirm against the signed agreement)` });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const outside = entries.filter((e) => !e.counted);
+    const rows = entries.filter((e) => e.date && e.counted).map((e) => [q(`CU-${e.id}`), e.date, q(e.title), q(e.title), '', e.hours,
+      e.date > today ? 'forecast' : 'used', q(e.id), q('From the ClickUp hours tracker'), q(e.pool)].join(','));
+    const result = rows.length
+      ? importer.importTracker(db, { clientId, actor, filename: 'ClickUp hours tracker',
+        csv: ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes,category', ...rows].join('\n') })
+      : { created: 0, skipped: 0, conflicts: [] };
+    db.prepare('UPDATE hours_trackers SET imported_at = ?, last_error = NULL WHERE list_id = ?').run(nowIso(), String(listId));
+    return { ...result, found: entries.length, contracted, undated: entries.filter((e) => !e.date).length,
+      not_counted: outside.length ? { calls: outside.length, hours: quarter(outside.reduce((a, e) => a + e.hours, 0)),
+        pools: [...new Set(outside.map((e) => e.pool))] } : null };
+  } catch (e) {
+    db.prepare('UPDATE hours_trackers SET last_error = ? WHERE list_id = ?').run(String(e.message).slice(0, 300), String(listId));
+    throw e;
+  }
+}
+
+async function refreshHoursTrackers(db, adapter, log = console) {
+  if (!adapter || adapter.mode !== 'live') return;
+  for (const h of db.prepare('SELECT * FROM hours_trackers').all()) {
+    try { await importHoursTracker(db, { clientId: h.client_id, listId: h.list_id, adapter, actor: 'scheduled-sync' }); }
+    catch (e) { log.error(`Hours tracker ${h.list_id} failed: ${e.message}`); }
+  }
+}
+
 // ---------------------------------------------------------------- find every client's tracker in ClickUp
 const TRACKER_NAME = /(point\s*track|service\s*point)/i;
 const TEMPLATE_NAME = /\[template\]|\[year\]|#\s*points\)/i;
@@ -548,6 +640,7 @@ async function findTrackers(db, adapter) {
   const tree = await adapter.listHierarchy();
   const mapped = db.prepare(`SELECT m.value, c.id AS client_id, c.name FROM source_mappings m JOIN clients c ON c.id = m.client_id WHERE m.source_type = 'clickup_list'`).all();
   const byList = Object.fromEntries(mapped.map((r) => [r.value, r]));
+  for (const r of db.prepare('SELECT h.list_id AS value, c.id AS client_id, c.name FROM hours_trackers h JOIN clients c ON c.id = h.client_id').all()) byList[r.value] = r;
   const out = [];
   const feedTaken = new Set(db.prepare('SELECT list_id FROM client_feeds').all().map((r) => r.list_id));
   for (const sp of tree) {
@@ -556,11 +649,12 @@ async function findTrackers(db, adapter) {
     // Approvals watch the whole client space: items in a review status, or assigned to the client's people.
     const collab = { id: `space:${sp.space.id}`, name: `Everything in ${sp.space.name} waiting on the client`, taken: sp.space.id };
     for (const l of sp.lists) {
-      if (!TRACKER_NAME.test(l.name) || TEMPLATE_NAME.test(l.name) || /template/i.test(sp.space.name)) continue;
+      const kind = TRACKER_NAME.test(l.name) ? 'points' : HOURS_TRACKER_NAME.test(l.name) ? 'hours' : null;
+      if (!kind || TEMPLATE_NAME.test(l.name) || /template/i.test(sp.space.name)) continue;
       const existing = byList[l.id];
       const sameName = db.prepare('SELECT id, name FROM clients WHERE lower(name) = lower(?)').get(sp.space.name);
-      out.push({ list_id: l.id, list_name: l.name.trim(), space: sp.space.name, folder: l.folder, client_name: sp.space.name,
-        allocation: parseAllocation(l.name), status: existing ? 'linked' : sameName ? 'client_exists' : 'new',
+      out.push({ list_id: l.id, list_name: l.name.trim(), space: sp.space.name, folder: l.folder, client_name: sp.space.name, kind,
+        allocation: kind === 'hours' ? null : parseAllocation(l.name), status: existing ? 'linked' : sameName ? 'client_exists' : 'new',
         client_id: existing ? existing.client_id : sameName ? sameName.id : null, linked_to: existing ? existing.name : null,
         calendar: cal ? { id: cal.id, name: cal.name.trim(), linked: feedTaken.has(cal.id) } : null,
         collaboration: { id: collab.id, name: collab.name, linked: feedTaken.has(collab.taken) } });
@@ -595,14 +689,21 @@ async function importTrackers(db, { items, adapter, actor }) {
     try {
       const listId = String(it.listId || '').trim();
       if (!/^\d+$/.test(listId)) throw new Error('Missing ClickUp list');
-      const mapping = db.prepare(`SELECT client_id FROM source_mappings WHERE source_type = 'clickup_list' AND value = ?`).get(listId);
+      const hoursKind = it.kind === 'hours';
+      const mapping = db.prepare(`SELECT client_id FROM source_mappings WHERE source_type = 'clickup_list' AND value = ?`).get(listId)
+        || db.prepare('SELECT client_id FROM hours_trackers WHERE list_id = ?').get(listId);
       let clientId = mapping ? mapping.client_id : null;
       let created = false; let term = null;
       if (!clientId) {
         const name = String(it.name || '').trim();
         if (!name) throw new Error('Enter the client name');
         const same = db.prepare('SELECT id FROM clients WHERE lower(name) = lower(?)').get(name);
-        if (same) {
+        if (same && hoursKind) {
+          if (db.prepare('SELECT unit FROM clients WHERE id = ?').get(same.id).unit !== 'hours') {
+            throw new Error(`${name} is set up for points. Switch it to hours (Admin → Clients → Edit) or rename this row to make a separate client`);
+          }
+          clientId = same.id;
+        } else if (same) {
           clientId = same.id;
           // A second tracker for an existing client (e.g. a separate implementation pool) adds its points.
           const extra = Number(it.allocation);
@@ -617,12 +718,15 @@ async function importTrackers(db, { items, adapter, actor }) {
           const menu = db.prepare('SELECT id FROM menu_versions ORDER BY effective_date DESC, id DESC LIMIT 1').get();
           if (!menu) throw new Error('Create a service menu first (Admin → Service menu)');
           const alloc = Number(it.allocation);
-          const c = admin.createClient(db, { name, termStart: term.term_start, termEnd: term.term_end, menuVersionId: menu.id,
+          const c = admin.createClient(db, { name, termStart: term.term_start, termEnd: term.term_end, menuVersionId: menu.id, unit: hoursKind ? 'hours' : 'points',
             agreementRef: `From ClickUp tracker "${it.listName || listId}" (update with the signed agreement)`,
-            basePoints: Number.isInteger(alloc) && alloc >= 0 ? alloc : 0, actor });
+            basePoints: Number.isFinite(alloc) && alloc >= 0 ? (hoursKind ? quarter(alloc) : Math.round(alloc)) : 0, actor });
           clientId = c.id; created = true;
         }
-        admin.addMapping(db, { clientId, sourceType: 'clickup_list', value: listId, scope: 'points', label: it.listName || null, actor });
+        if (hoursKind) {
+          db.prepare('INSERT OR IGNORE INTO hours_trackers (list_id, client_id, label) VALUES (?,?,?)').run(listId, clientId, it.listName || null);
+          audit(db, { clientId, actor, action: 'hours_tracker.link', detail: { list_id: listId, name: it.listName || null } });
+        } else admin.addMapping(db, { clientId, sourceType: 'clickup_list', value: listId, scope: 'points', label: it.listName || null, actor });
       }
       const feedsMod = require('./feeds');
       const linkedFeeds = [];
@@ -635,7 +739,9 @@ async function importTrackers(db, { items, adapter, actor }) {
       const r = await importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmpty: true });
       const b = activeContract(db, clientId) && require('./ledger').balance(db, clientId);
       results.push({ listId, clientId, name: db.prepare('SELECT name FROM clients WHERE id = ?').get(clientId).name, created, term,
-        found: r.found, added: r.created, skipped: r.skipped, balance: b, linked_feeds: linkedFeeds, warning: created && !(Number(it.allocation) > 0) ? 'No allocation in the list name: set it with + Add points → Add to allocation' : null });
+        found: r.found, added: r.created, skipped: r.skipped, balance: b, unit: db.prepare('SELECT unit FROM clients WHERE id = ?').get(clientId).unit, linked_feeds: linkedFeeds,
+        warning: [b && b.allocated === 0 ? `No allocation found: set it with "+ Add ${hoursKind ? 'hours' : 'points'} → Add to allocation"` : null,
+          r.not_counted ? `${r.not_counted.calls} calls (${r.not_counted.hours} h) in ${r.not_counted.pools.join(', ')} aren't in a contracted pool, so they weren't counted` : null].filter(Boolean).join(' · ') || null });
     } catch (e) {
       results.push({ listId: it.listId, name: it.name, error: e.message });
     }
@@ -643,4 +749,4 @@ async function importTrackers(db, { items, adapter, actor }) {
   return results;
 }
 
-module.exports = { findTrackers, importTrackers, parseAllocation, detectTerm, importTrackerFromClickUp, syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };
+module.exports = { readHoursTracker, importHoursTracker, refreshHoursTrackers, HOURS_TRACKER_NAME, findTrackers, importTrackers, parseAllocation, detectTerm, importTrackerFromClickUp, syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };
