@@ -561,7 +561,7 @@ async function renderPreview() {
         c.show_planned ? 'Hide planned work' : 'Show planned work')),
     logins,
     h('h2', { class: 'preview-title' }, 'What the client sees'),
-    h('div', { class: 'preview-frame' }, renderClientView(v)));
+    h('div', { class: 'preview-frame' }, renderClientView(v, { preview: true })));
 }
 
 // ------------------------------------------------------------------ shared: one-time setup link

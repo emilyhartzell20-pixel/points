@@ -124,6 +124,14 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     send(res, 200, clientDashboard(db, user.client_id));
   });
 
+  // A client approves or requests changes on something waiting for them (written back to that ClickUp task).
+  route('POST', '/api/client/reviews/:taskId', 'client', async ({ req, res, p, user }) => {
+    const c = db.prepare('SELECT portal_enabled FROM clients WHERE id = ?').get(user.client_id);
+    if (!c || !c.portal_enabled) throw new AppError(403, 'Dashboard access has not been granted');
+    const b = await readJson(req);
+    send(res, 200, await feeds.respondToReview(db, adapters.clickup, { clientId: user.client_id, user, taskId: p.taskId, decision: b.decision, comment: b.comment }));
+  });
+
   // ---- staff
   route('GET', '/api/staff/clients', 'staff', ({ res }) => {
     const rows = db.prepare('SELECT id, slug, name, portal_enabled, pilot FROM clients ORDER BY pilot DESC, name').all();

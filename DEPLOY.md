@@ -102,7 +102,7 @@ Do this only when LeadG2 asks. Until then the app runs without these connections
 
 | Connector | What to provision | `.env` |
 |---|---|---|
-| ClickUp | An API token from a ClickUp member with access to the client spaces. Read-only use is enforced in code (the connector only issues GET requests). | `CLICKUP_API_TOKEN` |
+| ClickUp | An API token from a ClickUp member with access to the client spaces. The app reads with GET requests; its only write is recording a client's review answer (one task's status + a comment), and the token's member needs edit access to the clients' collaboration lists for that. | `CLICKUP_API_TOKEN` |
 | Outlook | An Entra ID app registration with **Microsoft Graph `Mail.Read` (application)** permission, restricted by an **Exchange application access policy** to the single shared mailbox LeadG2 designates. | `OUTLOOK_MAILBOX`, `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` |
 
 Then set `CONNECTOR_MODE=live` and set `INTERNAL_EMAIL_DOMAINS=leadg2.com,thecenterforsalesstrategy.com`.

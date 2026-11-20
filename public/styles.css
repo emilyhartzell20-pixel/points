@@ -312,7 +312,13 @@ button.type-chip { cursor: pointer; }
 .outlook-table tr:last-child td { border-bottom: none; }
 .waiting.has-items { border-left: 3px solid var(--accent); }
 .waiting-list { list-style: none; margin: 0; padding: 0; }
-.waiting-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.waiting-list li { padding: 12px 0; border-top: 1px solid var(--line); }
+.waiting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.waiting-list .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.changes-box { margin-top: 10px; display: grid; gap: 8px; }
+.changes-box textarea { width: 100%; box-sizing: border-box; }
+.waiting-list .answered { margin: 4px 0 0; color: var(--ok, #1a7f4b); font-weight: 700; }
+.waiting-list button:disabled { opacity: .5; cursor: not-allowed; }
 .waiting-list li:first-child { border-top: none; }
 .btn-link { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700; padding: 8px 14px; border-radius: var(--radius-sm); white-space: nowrap; }
 .btn-link:hover { background: var(--lg-orange-dark); }

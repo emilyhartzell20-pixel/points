@@ -84,3 +84,81 @@ test('one client never sees another client\'s calendar or approvals', async (t) 
   const staff = client(srv.base); await staff.login(DEMO_STAFF.email, DEMO_STAFF.password);
   assert.equal((await staff.post(`/api/staff/clients/${s.bb}/feeds`, { kind: 'collaboration', listId: '701' })).status, 409, 'a list can only feed one client');
 });
+
+// ---------------------------------------------------------------- answering reviews from the dashboard
+const { writeJson } = require('../src/adapters/http');
+const { LiveClickUp } = require('../src/adapters/clickup');
+const STATUSES = ['not ready', 'ready for review', 'revision needed', 'under revision', 'done'].map((status) => ({ status, type: status === 'done' ? 'closed' : 'custom' }));
+function writer() {
+  const sent = [];
+  return { sent, a: { ...adapter, listStatuses: async () => STATUSES, respondToReview: async (taskId, ans) => { sent.push({ taskId, ...ans }); } } };
+}
+const dana = { email: 'dana@q.example', name: 'Dana Q' };
+
+test('approve: sets the task to its list\'s approved status, comments, and drops off "waiting"', async () => {
+  const { db, clientId } = setup();
+  const { a, sent } = writer();
+  feeds.addFeed(db, { clientId, kind: 'collaboration', listId: '701', actor: 't' });
+  await feeds.refreshFeeds(db, a, { clientId });
+  const r = await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'approve' });
+  assert.equal(r.status, 'done');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].comment, /Approved by Dana Q \(client\)/);
+  assert.equal(clientDashboard(db, clientId).content.waiting.length, 0);
+  assert.ok(db.prepare(`SELECT 1 FROM audit_log WHERE action = 'review.approve' AND actor = ?`).get(dana.email));
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'approve' }), /already been answered/);
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c2', decision: 'approve' }), /already been answered/, 'not-ready items cannot be approved');
+  assert.equal(sent.length, 1);
+});
+
+test('request changes: needs a note, sets "revision needed" and passes the note on', async () => {
+  const { db, clientId } = setup();
+  const { a, sent } = writer();
+  feeds.addFeed(db, { clientId, kind: 'collaboration', listId: '701', actor: 't' });
+  await feeds.refreshFeeds(db, a, { clientId });
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'changes', comment: '  ' }), /what you would like changed/);
+  const r = await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'changes', comment: 'Swap the hero image' });
+  assert.equal(r.status, 'revision needed');
+  assert.match(sent[0].comment, /Changes requested by Dana Q[\s\S]*Swap the hero image/);
+  assert.equal(feeds.targetStatus([{ status: 'Client Approved', type: 'custom' }, { status: 'complete', type: 'closed' }], 'approve'), 'Client Approved');
+});
+
+test('a ClickUp failure is reported and the item stays waiting', async () => {
+  const { db, clientId } = setup();
+  const a = { ...adapter, listStatuses: async () => STATUSES, respondToReview: async () => { throw new Error('api.clickup.com responded 401'); } };
+  feeds.addFeed(db, { clientId, kind: 'collaboration', listId: '701', actor: 't' });
+  await feeds.refreshFeeds(db, a, { clientId });
+  await assert.rejects(feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'c1', decision: 'approve' }), /didn't accept/);
+  assert.equal(clientDashboard(db, clientId).content.waiting.length, 1);
+});
+
+test('the ClickUp write path can only set a task status or add a task comment', async () => {
+  const calls = [];
+  const fetchImpl = async (url, o) => { calls.push([o.method, new URL(url).pathname, JSON.parse(o.body)]); return { ok: true, json: async () => ({}) }; };
+  await new LiveClickUp({ token: 'x', fetchImpl }).respondToReview('86abc', { status: 'done', comment: 'hi' });
+  assert.deepEqual(calls.map((c) => c.slice(0, 2)), [['PUT', '/api/v2/task/86abc'], ['POST', '/api/v2/task/86abc/comment']]);
+  assert.deepEqual(calls[0][2], { status: 'done' });
+  for (const [method, url] of [['DELETE', 'https://api.clickup.com/api/v2/task/1'], ['PUT', 'https://api.clickup.com/api/v2/list/1'],
+    ['POST', 'https://api.clickup.com/api/v2/task/1/attachment'], ['PUT', 'https://evil.example/api/v2/task/1'], ['POST', 'https://api.clickup.com/api/v2/task/../list/1/task']]) {
+    await assert.rejects(writeJson(url, {}, { method, body: {}, fetchImpl }), /not permitted/, `${method} ${url}`);
+  }
+});
+
+test('a client can only answer their own items, and staff cannot answer for them', async (t) => {
+  const s = await seeded({ sync: false });
+  const { a, sent } = writer();
+  feeds.addFeed(s.db, { clientId: s.hp, kind: 'collaboration', listId: '701', actor: 't' });
+  await feeds.refreshFeeds(s.db, a, { clientId: s.hp });
+  s.db.prepare('UPDATE clients SET portal_enabled = 1').run();
+  const srv = await startServer(createApp({ db: s.db, adapters: { clickup: a } }));
+  t.after(srv.close);
+  const pat = client(srv.base); await pat.login('pat@bluebirddental.example', 'demo-client');
+  assert.equal((await pat.post('/api/client/reviews/c1', { decision: 'approve' })).status, 404);
+  const staff = client(srv.base); await staff.login(DEMO_STAFF.email, DEMO_STAFF.password);
+  assert.equal((await staff.post('/api/client/reviews/c1', { decision: 'approve' })).status, 403);
+  assert.equal(sent.length, 0);
+  const dana2 = client(srv.base); await dana2.login('dana@harborpoint.example', 'demo-client');
+  const ok = await dana2.post('/api/client/reviews/c1', { decision: 'approve' });
+  assert.equal(ok.status, 200);
+  assert.equal(sent.length, 1);
+});

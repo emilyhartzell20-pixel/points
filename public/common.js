@@ -48,7 +48,7 @@ function toast(msg, kind = 'ok') {
 async function logout() { await api('/api/logout', {}); location.href = '/login'; }
 
 /** The client dashboard. Shared by the client page and the staff preview, so both show exactly the same. */
-function renderClientView(v) {
+function renderClientView(v, opts = {}) {
   const stat = (label, value, cls, note) => h('div', { class: `stat ${cls || ''}` },
     h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, String(value)), note ? h('div', { class: 'stat-note' }, note) : null);
   const bd = v.allocation_breakdown;
@@ -61,7 +61,7 @@ function renderClientView(v) {
       h('p', { class: 'eyebrow' }, v.client.name),
       h('h1', {}, 'Your service points, ', h('em', {}, 'at a glance.')),
       h('p', { class: 'lede' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Balance last updated ${fmtDateTime(v.last_updated)}`)),
-    renderWaiting(v.content),
+    renderWaiting(v.content, opts),
     h('section', { class: 'stats', 'aria-label': 'Point balance' },
       stat('Total allocated', v.balance.allocated, '', allocNote),
       stat('Used', v.balance.used, 'used', 'Completed work'),
@@ -212,14 +212,48 @@ function renderOutlook(o, { showPlanned = true, forClient = false } = {}) {
 
 // ------------------------------------------------------------------ client content: waiting on you + editorial calendar
 const CAL_STAGE = { published: 'Published', in_review: 'In review', in_progress: 'In progress', planned: 'Planned' };
-function renderWaiting(c) {
+function renderWaiting(c, { preview = false, onAnswered } = {}) {
   if (!c || !c.waiting) return null;
   const n = c.waiting.length;
+  const item = (w) => {
+    const li = h('li', { class: 'waiting-item' });
+    const msg = h('p', { class: 'error small', role: 'alert', hidden: true });
+    const send = async (decision, comment, btns) => {
+      btns.forEach((b) => { b.disabled = true; });
+      try {
+        await api(`/api/client/reviews/${encodeURIComponent(w.id)}`, { decision, comment });
+        li.replaceChildren(h('div', { class: 'work-desc' }, w.title),
+          h('p', { class: 'answered' }, decision === 'approve' ? '✓ Approved. Thank you!' : '✓ Sent. We\'ll make your changes and send it back for review.'));
+        li.classList.add('done');
+        if (onAnswered) setTimeout(onAnswered, 2500);
+      } catch (e) { msg.textContent = e.message; msg.hidden = false; btns.forEach((b) => { b.disabled = false; }); }
+    };
+    const open = w.url ? h('a', { class: 'small', href: w.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open in ClickUp ↗') : null;
+    const approve = h('button', { type: 'button', class: 'primary', disabled: preview || null }, 'Approve');
+    const changes = h('button', { type: 'button', disabled: preview || null }, 'Request changes');
+    const box = h('div', { class: 'changes-box', hidden: true });
+    const ta = h('textarea', { rows: '3', maxlength: '2000', placeholder: 'What would you like changed?', 'aria-label': `Changes for ${w.title}` });
+    const sendChanges = h('button', { type: 'button', class: 'primary' }, 'Send changes');
+    const cancel = h('button', { type: 'button', class: 'ghost' }, 'Cancel');
+    box.append(ta, h('div', { class: 'row-actions' }, sendChanges, cancel));
+    approve.onclick = () => { if (confirm(`Approve "${w.title}"?`)) send('approve', '', [approve, changes]); };
+    changes.onclick = () => { box.hidden = false; changes.hidden = true; approve.hidden = true; ta.focus(); };
+    cancel.onclick = () => { box.hidden = true; changes.hidden = false; approve.hidden = false; };
+    sendChanges.onclick = () => {
+      if (!ta.value.trim()) { msg.textContent = 'Tell us what you would like changed.'; msg.hidden = false; ta.focus(); return; }
+      send('changes', ta.value, [sendChanges, cancel]);
+    };
+    li.append(
+      h('div', { class: 'waiting-row' },
+        h('div', {}, h('div', { class: 'work-desc' }, w.title), h('div', { class: 'work-meta' }, w.due ? `Due ${fmtDate(w.due)}` : 'No due date', open ? ' · ' : '', open)),
+        h('div', { class: 'row-actions' }, approve, changes)),
+      box, msg);
+    return li;
+  };
   return h('section', { class: `card waiting${n ? ' has-items' : ''}` },
     h('div', { class: 'toolbar' }, h('h2', {}, 'Waiting ', h('em', {}, 'on you')), h('span', { class: 'muted small' }, n ? `${n} item${n === 1 ? '' : 's'} ready for your review` : 'Nothing needs you right now')),
-    n ? h('ul', { class: 'waiting-list' }, c.waiting.map((w) => h('li', {},
-      h('div', {}, h('div', { class: 'work-desc' }, w.title), h('div', { class: 'work-meta' }, w.due ? `Due ${fmtDate(w.due)}` : 'No due date')),
-      w.url ? h('a', { class: 'btn-link', href: w.url, target: '_blank', rel: 'noopener noreferrer' }, 'Review →') : null)))
+    preview && n ? h('p', { class: 'muted small' }, 'Preview: the buttons work only for the client.') : null,
+    n ? h('ul', { class: 'waiting-list' }, c.waiting.map(item))
       : h('p', { class: 'muted small' }, 'When we send something for your review or approval, it will appear here.'));
 }
 function renderCalendar(c) {

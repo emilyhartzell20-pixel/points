@@ -4,7 +4,7 @@
 // so the normalizer below is exercised by both modes.
 const fs = require('node:fs');
 const path = require('node:path');
-const { getJson } = require('./http');
+const { getJson, writeJson } = require('./http');
 
 const API = 'https://api.clickup.com/api/v2';
 
@@ -79,7 +79,11 @@ class SampleClickUp {
     const spaces = new Set(mappings.filter((m) => m.source_type === 'clickup_space').map((m) => m.value));
     return tasks.filter((t) => lists.has(String(t.list && t.list.id)) || spaces.has(String(t.space && t.space.id)));
   }
+  // Demo only: remembers review answers in memory instead of writing anywhere.
+  async listStatuses() { return SAMPLE_REVIEW_STATUSES; }
+  async respondToReview(taskId, answer) { (this.responses = this.responses || []).push({ taskId, ...answer }); }
 }
+const SAMPLE_REVIEW_STATUSES = ['not ready', 'ready for review', 'revision needed', 'under revision', 'done'].map((status) => ({ status, type: status === 'done' ? 'closed' : 'custom' }));
 
 class LiveClickUp {
   constructor({ token = process.env.CLICKUP_API_TOKEN, fetchImpl } = {}) {
@@ -99,6 +103,19 @@ class LiveClickUp {
   }
   /** Workspaces → spaces → lists, so staff can pick lists instead of pasting IDs. Read-only. */
   /** One task by id (used to look up a month heading the sync hasn't seen). Read-only. */
+  /** The statuses a list offers (read-only), so a review answer uses that list's own status names. */
+  async listStatuses(listId) {
+    const l = await this.get(`/list/${encodeURIComponent(listId)}`);
+    return (l.statuses || []).map((x) => ({ status: x.status, type: x.type }));
+  }
+  /** The app's only ClickUp write: record a client's review answer (status + comment) on one task. */
+  async respondToReview(taskId, { status, comment }) {
+    if (!this.token) throw new Error('ClickUp is not configured (CLICKUP_API_TOKEN missing on the server)');
+    const headers = { Authorization: this.token, Accept: 'application/json' };
+    const id = encodeURIComponent(taskId);
+    await writeJson(`${API}/task/${id}`, headers, { method: 'PUT', body: { status }, fetchImpl: this.fetchImpl });
+    await writeJson(`${API}/task/${id}/comment`, headers, { method: 'POST', body: { comment_text: comment, notify_all: true }, fetchImpl: this.fetchImpl });
+  }
   async fetchTaskById(id) {
     return this.get(`/task/${encodeURIComponent(id)}`);
   }

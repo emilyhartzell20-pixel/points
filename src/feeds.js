@@ -1,6 +1,7 @@
 'use strict';
 // Client-facing ClickUp lists: the editorial calendar and "waiting on you" (items ready for the client's review).
-// Read-only: the app copies title, status and date of each task; never descriptions, comments or assignees.
+// The app copies title, status and date of each task; never descriptions, comments or assignees.
+// Its one write: when a client answers a review here, it sets that task's status and adds their comment.
 const { tx, audit, AppError, nowIso } = require('./db');
 
 const KINDS = ['calendar', 'collaboration'];
@@ -47,6 +48,10 @@ async function refreshFeeds(db, adapter, { clientId = null } = {}) {
         }
         db.prepare('UPDATE client_feeds SET refreshed_at = ?, last_error = NULL WHERE id = ?').run(nowIso(), f.id);
       });
+      if (f.kind === 'collaboration' && typeof adapter.listStatuses === 'function') {
+        const st = await adapter.listStatuses(f.list_id);
+        db.prepare('UPDATE client_feeds SET statuses = ? WHERE id = ?').run(JSON.stringify(st), f.id);
+      }
       refreshed++;
     } catch (e) {
       db.prepare('UPDATE client_feeds SET last_error = ? WHERE id = ?').run(String(e.message).slice(0, 300), f.id);
@@ -79,10 +84,65 @@ function clientFeeds(db, clientId, { today = new Date().toISOString().slice(0, 1
   const waiting = feeds.some((f) => f.kind === 'collaboration')
     ? items('collaboration').filter((i) => WAITING.test(i.status || ''))
       .sort((a, z) => String(a.due_date || '9999').localeCompare(String(z.due_date || '9999')))
-      .map((i) => ({ title: i.title, due: i.due_date, url: i.url, status: 'Ready for your review' }))
+      .map((i) => ({ id: i.task_id, title: i.title, due: i.due_date, url: i.url, status: 'Ready for your review' }))
     : null;
   const refreshed = feeds.map((f) => f.refreshed_at).filter(Boolean).sort()[0] || null;
   return { calendar, waiting, refreshed_at: refreshed };
+}
+
+// ------------------------------------------------------------------ answering a review from the dashboard
+const pick = (statuses, tests) => {
+  for (const t of tests) { const s = statuses.find((x) => (typeof t === 'function' ? t(x) : t.test(String(x.status || '')))); if (s) return s.status; }
+  return null;
+};
+function targetStatus(statuses, decision) {
+  return decision === 'approve'
+    ? pick(statuses, [/^(client )?approved$/i, /approved/i, /^(done|complete|completed)$/i, (x) => x.type === 'closed'])
+    : pick(statuses, [/revision(s)? needed|changes requested|needs? (changes|revisions?)/i, /revis|changes/i]);
+}
+const inFlight = new Set();
+
+/**
+ * A client approves or asks for changes on an item waiting for them. The task must be in one of THIS
+ * client's approval lists and still waiting; the client is taken from the session, never the request.
+ */
+async function respondToReview(db, adapter, { clientId, user, taskId, decision, comment }) {
+  if (!['approve', 'changes'].includes(decision)) throw new AppError(400, 'Choose approve or request changes');
+  const note = String(comment || '').trim();
+  if (note.length > 2000) throw new AppError(400, 'Please keep your note under 2,000 characters');
+  if (decision === 'changes' && !note) throw new AppError(400, 'Tell us what you would like changed');
+  const item = db.prepare(`SELECT i.*, f.id AS fid, f.list_id, f.statuses FROM feed_items i JOIN client_feeds f ON f.id = i.feed_id
+    WHERE f.client_id = ? AND f.kind = 'collaboration' AND i.task_id = ?`).get(clientId, String(taskId));
+  if (!item) throw new AppError(404, 'Not found');
+  if (!WAITING.test(item.status || '')) throw new AppError(409, 'This item has already been answered');
+  if (!adapter || typeof adapter.respondToReview !== 'function') {
+    throw new AppError(409, 'Answering here isn\'t switched on yet. Please use "Open in ClickUp" for now.');
+  }
+  const key = `${clientId}:${item.task_id}`;
+  if (inFlight.has(key)) throw new AppError(409, 'Already sending your answer');
+  inFlight.add(key);
+  try {
+    let statuses = item.statuses ? JSON.parse(item.statuses) : null;
+    if (!statuses && typeof adapter.listStatuses === 'function') {
+      statuses = await adapter.listStatuses(item.list_id);
+      db.prepare('UPDATE client_feeds SET statuses = ? WHERE id = ?').run(JSON.stringify(statuses), item.fid);
+    }
+    const status = targetStatus(statuses || [], decision);
+    if (!status) throw new AppError(409, 'We couldn\'t record that automatically. Please use "Open in ClickUp" and let your consultant know.');
+    const who = user.name || user.email;
+    const text = decision === 'approve'
+      ? `✅ Approved by ${who} (client) on the LeadG2 points dashboard.${note ? `\n\nNote: ${note}` : ''}`
+      : `✏️ Changes requested by ${who} (client) on the LeadG2 points dashboard:\n\n${note}`;
+    try {
+      await adapter.respondToReview(item.task_id, { status, comment: text });
+    } catch (e) {
+      audit(db, { clientId, actor: user.email, action: `review.${decision}.failed`, detail: { task_id: item.task_id, error: String(e.message).slice(0, 200) } });
+      throw new AppError(502, 'ClickUp didn\'t accept the update. Please try again in a minute, or use "Open in ClickUp".');
+    }
+    db.prepare('UPDATE feed_items SET status = ?, status_type = NULL WHERE feed_id = ? AND task_id = ?').run(status, item.fid, item.task_id);
+    audit(db, { clientId, actor: user.email, action: `review.${decision}`, detail: { task_id: item.task_id, title: item.title, status, note: note || null } });
+    return { ok: true, decision, status };
+  } finally { inFlight.delete(key); }
 }
 
 function scheduleFeedRefresh(db, adapter, { minutes = 30, log = console } = {}) {
@@ -92,4 +152,4 @@ function scheduleFeedRefresh(db, adapter, { minutes = 30, log = console } = {}) 
   setInterval(tick, minutes * 60e3).unref();
 }
 
-module.exports = { listFeeds, addFeed, removeFeed, refreshFeeds, clientFeeds, calendarStage, scheduleFeedRefresh, WAITING };
+module.exports = { respondToReview, targetStatus, listFeeds, addFeed, removeFeed, refreshFeeds, clientFeeds, calendarStage, scheduleFeedRefresh, WAITING };

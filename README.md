@@ -144,7 +144,7 @@ The scripted review also makes these decisions. None of them change the point ba
 ## Security notes
 
 - **Task and email text is evidence only.** It is regex-classified for signals (requested, approved, completed, canceled, changed) and shown escaped (`textContent`, strict CSP). It is never treated as instructions. Text that looks like instructions is flagged `embedded_instructions`.
-- **Connectors are read-only.** `adapters/http.js` refuses any method except GET. Tokens are read from server environment variables, sent only in headers, and never written to sync errors or the browser.
+- **Connectors read; one narrow write.** `adapters/http.js` refuses any method except GET for reading. The single exception is a client answering a review on their dashboard (**Waiting on you → Approve / Request changes**): the app sets that one ClickUp task's status (the list's approved/done status, or "revision needed") and adds a comment naming the client. `writeJson` only allows `PUT /task/:id` and `POST /task/:id/comment` on api.clickup.com. The server checks the task is in that client's own approvals list and still waiting, and every answer is in the audit log. Tokens are read from server environment variables, sent only in headers, and never written to sync errors or the browser.
 - **Sessions:** HttpOnly, SameSite=Strict cookies. Tokens are stored hashed. Passwords use scrypt. POST requests must be JSON. Revoking a client's access ends their sessions.
 
 ## Connecting real accounts (after the pilot sign-off)
