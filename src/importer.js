@@ -47,7 +47,7 @@ function importTracker(db, { clientId, csv, actor, opening = false, filename = '
       // Already imported: verify idempotently instead of re-posting.
       const dupes = rows.filter((r) => db.prepare('SELECT 1 FROM work_items WHERE client_id=? AND external_ref=?').get(clientId, `tracker:${r.tracker_id}`));
       if (dupes.length === rows.length) return { created: 0, skipped: rows.length, conflicts: [] };
-      throw new AppError(409, 'Opening balance was already reconciled; import new activity with the regular import instead');
+      throw new AppError(409, `This client's opening balance is already set (${contract.opening_used || 0} used / ${contract.opening_committed || 0} committed). Untick "This is the reconciled opening balance" and import again: the rows are added to the ledger the same way.`);
     }
     let created = 0, skipped = 0; const conflicts = [];
     for (const r of rows) {

@@ -333,8 +333,8 @@ function renderSources() {
       key !== 'tracker' ? h('p', {}, h('span', { class: `status ${mode === 'live' ? 'active' : mode === 'sample' ? 'invited' : 'invite_expired'}` }, MODE_TEXT[mode] || mode)) : null,
       key !== 'tracker' && mode === 'not_connected' ? h('ol', { class: 'small steps' }, HOW_TO[key].map((t) => h('li', {}, t))) : null,
       key !== 'tracker' && mode === 'live' && !mapped ? h('p', { class: 'small' }, `No ${label} sources for this client yet. Add them below.`) : null,
-      h('p', { class: 'small' }, 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · syncs automatically every hour' : ''),
-      s.last_run ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}`) : null,
+      mode === 'not_connected' ? null : h('p', { class: 'small' }, key === 'tracker' ? 'Last import: ' : 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · syncs automatically every hour' : ''),
+      s.last_run && mode !== 'not_connected' ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}`) : null,
       s.recent_failures.length && mode !== 'not_connected' ? h('div', { class: 'error small' }, h('strong', {}, 'Recent failures'), h('ul', {}, s.recent_failures.slice(0, 3).map((f) => h('li', {}, `${fmtDateTime(f.started_at)}: ${f.error}`)))) : null,
       key !== 'tracker' && mode !== 'not_connected' ? h('button', { class: 'primary', disabled: !mapped, onclick: () => act(async () => {
         const r = await api(`/api/staff/clients/${state.clientId}/sync`, { source: key });
