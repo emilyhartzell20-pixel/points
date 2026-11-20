@@ -25,7 +25,9 @@ Use the **+ Add points** button in the staff console (top right, and on the Ledg
 
 ## Publishing (hosting)
 
-**IT handoff:** see [DEPLOY.md](DEPLOY.md) for step-by-step deployment with `compose.yaml`.
+**Publishing on Render at points.leadg2.com:** follow [PUBLISH.md](PUBLISH.md) (uses `render.yaml`). **Self-hosting by IT:** see [DEPLOY.md](DEPLOY.md) (uses `compose.yaml`).
+
+Set `BACKUP_DAILY=1` to have the app back itself up every 24 hours (on by default in `render.yaml`). Set `HUBSPOT_PRIVATE_APP_TOKEN` to copy each linked client's balance onto their HubSpot company record.
 
 
 The app ships as a container (`Dockerfile`) with no dependencies. Any host that runs a container with a **persistent disk** will work.

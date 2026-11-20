@@ -362,7 +362,7 @@ async function syncSource(db, { clientId, source, adapter, actor = 'system' }) {
 
 function syncStatus(db, clientId) {
   const out = {};
-  for (const source of ['clickup', 'outlook', 'tracker']) {
+  for (const source of ['clickup', 'outlook', 'tracker', 'hubspot']) {
     const ok = lastSuccess(db, clientId, source);
     const last = db.prepare('SELECT * FROM sync_runs WHERE client_id=? AND source=? ORDER BY id DESC LIMIT 1').get(clientId, source);
     const failures = db.prepare(`SELECT started_at, error FROM sync_runs WHERE client_id=? AND source=? AND status='failed' ORDER BY id DESC LIMIT 5`).all(clientId, source);

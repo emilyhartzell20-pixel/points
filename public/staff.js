@@ -328,11 +328,23 @@ function renderSources() {
   };
   return h('div', {},
     h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('outlook', 'Outlook'), box('tracker', 'Tracker import')),
+    renderHubSpotCard(o),
     h('section', { class: 'card' }, h('h2', {}, 'Contract & allocation (source of truth)'),
       h('p', {}, `${o.contract.agreement_ref} · term ${fmtDate(o.contract.term_start)} – ${fmtDate(o.contract.term_end)} · menu ${o.menu.version.code}`),
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
       h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${a.points} pts — ${a.source_ref} (verified by ${a.verified_by})`)))),
     renderMappings(o));
+}
+
+function renderHubSpotCard(o) {
+  const st = o.sync.hubspot; const linked = o.client.hubspot_company_id;
+  return h('section', { class: 'card' }, h('div', { class: 'toolbar' }, h('h2', {}, 'HubSpot company record'),
+      o.hubspot.configured && linked ? h('button', { class: 'secondary', onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/hubspot-sync`, {}), 'Balance sent to HubSpot') }, 'Update HubSpot now') : null),
+    h('p', { class: 'muted small' }, 'Allocated, used, committed and available points (plus contract end) are copied onto this client\'s HubSpot company record within a few minutes of any change, so your team can see them, report on them and use them in workflows.'),
+    !o.hubspot.configured ? h('p', { class: 'small' }, 'Not connected yet: the HubSpot app token has not been added to the server (see the publishing guide).')
+      : !linked ? h('p', { class: 'small' }, 'This client is not linked to a HubSpot company yet. Add it under Admin → Clients → Edit.')
+      : h('p', { class: 'small' }, `Linked to company ${linked} · last update ${fmtDateTime(st.last_success_at)}`),
+    st.recent_failures.length ? h('p', { class: 'error small' }, `Last error: ${st.recent_failures[0].error}`) : null);
 }
 
 const MAP_TYPE_TEXT = { clickup_space: 'ClickUp space', clickup_list: 'ClickUp list', email_domain: 'Email domain', email_address: 'Email address' };
@@ -495,7 +507,8 @@ async function renderClients() {
     h('div', { class: 'form-section' }, 'Client'),
     h('div', { class: 'form-grid' },
       h('label', {}, 'Client name', f('name', { required: true, placeholder: 'e.g. Harbor Point Logistics' })),
-      h('label', {}, 'Other names they go by (optional, comma-separated)', f('aliases', { placeholder: 'e.g. Harbor Point, HPL' }))),
+      h('label', {}, 'Other names they go by (optional, comma-separated)', f('aliases', { placeholder: 'e.g. Harbor Point, HPL' })),
+      h('label', {}, 'HubSpot company (optional: paste the record URL)', f('hubspotCompanyId', { placeholder: 'https://app.hubspot.com/contacts/…/record/0-2/123456' }))),
     h('div', { class: 'form-section' }, 'Contract (from the signed agreement)'),
     h('div', { class: 'form-grid' },
       h('label', {}, 'Term starts', f('termStart', { type: 'date', required: true })),
@@ -532,16 +545,18 @@ function editClient(c) {
   const name = h('input', { value: c.name, required: true }); const aliases = h('input', { value: c.aliases.join(', ') });
   const ts = h('input', { type: 'date', value: c.term_start }); const te = h('input', { type: 'date', value: c.term_end });
   const ref = h('input', { value: c.agreement_ref || '' });
+  const hs = h('input', { value: c.hubspot_company_id || '', placeholder: 'Paste the HubSpot company record URL' });
   const form = h('form', { class: 'dlg-body' },
     h('label', {}, 'Client name', name), h('label', {}, 'Other names they go by (comma-separated)', aliases),
     h('div', { class: 'row' }, h('label', {}, 'Term starts', ts), h('label', {}, 'Term ends', te)),
     h('label', {}, 'Agreement reference', ref),
+    h('label', {}, 'HubSpot company (record URL or ID)', hs),
     h('p', { class: 'muted small' }, 'To change points, use "+ Add points → Add to allocation" in the client workspace. To change their menu, use the Service menu tab.'),
     h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Save'), h('button', { type: 'button', onclick: close }, 'Cancel')));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api(`/api/staff/clients/${c.id}`, { name: name.value, aliases: aliases.value, termStart: ts.value, termEnd: te.value, agreementRef: ref.value });
+      await api(`/api/staff/clients/${c.id}`, { name: name.value, aliases: aliases.value, termStart: ts.value, termEnd: te.value, agreementRef: ref.value, hubspotCompanyId: hs.value });
       close(); await loadClients(); toast('Client updated'); render();
     } catch (ex) { toast(ex.message, 'error'); }
   });

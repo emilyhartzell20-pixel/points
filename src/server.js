@@ -11,6 +11,8 @@ const review = require('./review');
 const ingest = require('./ingest');
 const importer = require('./importer');
 const admin = require('./admin');
+const { HubSpotSync } = require('./adapters/hubspot');
+const hubspotSync = require('./hubspotSync');
 const { clientDashboard } = require('./clientView');
 const { menuForClient } = require('./menu');
 const { SampleClickUp, LiveClickUp } = require('./adapters/clickup');
@@ -58,7 +60,7 @@ function serveStatic(res, file) {
   send(res, 200, fs.readFileSync(p), { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
 }
 
-function createApp({ db, adapters = defaultAdapters(), secureCookies = process.env.NODE_ENV === 'production', demo = false } = {}) {
+function createApp({ db, adapters = defaultAdapters(), secureCookies = process.env.NODE_ENV === 'production', demo = false, hubspot = new HubSpotSync() } = {}) {
   // Sign-in throttle: at most 10 failed attempts per email and per IP in 15 minutes.
   const failures = new Map();
   const WINDOW = 15 * 60e3, LIMIT = 10;
@@ -125,6 +127,7 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
       menu, sync: ingest.syncStatus(db, id),
       mappings: db.prepare('SELECT * FROM source_mappings WHERE client_id = ?').all(id),
       connector_mode: Object.fromEntries(Object.entries(adapters).map(([k, a]) => [k, a.mode])),
+      hubspot: { configured: hubspot.configured },
     });
   });
   route('GET', '/api/staff/clients/:id/suggestions', 'staff', ({ res, p, url }) =>
@@ -219,6 +222,14 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
   route('POST', '/api/invite/accept', null, async ({ req, res }) => {
     const r = auth.acceptInvite(db, await readJson(req));
     if (!r.ok) throw new AppError(400, r.error);
+    send(res, 200, r);
+  });
+
+  route('POST', '/api/staff/clients/:id/hubspot-sync', 'staff', async ({ res, p, user }) => {
+    const id = clientExists(int(p.id));
+    if (!hubspot.configured) throw new AppError(409, 'HubSpot is not connected yet (HUBSPOT_PRIVATE_APP_TOKEN is not set on the server)');
+    const r = await hubspotSync.syncClient(db, hubspot, id, { force: true, actor: user.email });
+    if (r.status === 'skipped') throw new AppError(409, `${r.reason}. Add it under Admin → Clients → Edit.`);
     send(res, 200, r);
   });
 
@@ -322,8 +333,13 @@ if (require.main === module) {
     process.exit(1);
   }
   if (process.env.NODE_ENV === 'production' && !process.env.PUBLIC_URL) console.warn('PUBLIC_URL is not set: invite links will use the request host.');
+  if (process.env.BACKUP_DAILY === '1') {
+    require('./backup').scheduleDailyBackups(db, { dbFile: process.env.DB_FILE || require('node:path').join(__dirname, '..', 'data', 'leadg2.db') });
+  }
+  const hubspot = new HubSpotSync();
+  if (hubspot.configured) hubspotSync.scheduleHubSpotSync(db, hubspot);
   const port = Number(process.env.PORT || 3000);
-  http.createServer(createApp({ db, demo: process.env.DEMO_MODE === '1' })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
+  http.createServer(createApp({ db, hubspot, demo: process.env.DEMO_MODE === '1' })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
 }
 
 module.exports = { createApp };

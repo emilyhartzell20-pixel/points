@@ -65,6 +65,8 @@ This creates another admin and prints a new link.
 
 ## 4. Back up
 
+`BACKUP_DAILY=1` (set in `.env.example`) makes the app snapshot itself every 24 hours. The manual command below does the same on demand.
+
 - **Nightly snapshot.** This is safe while the app is running, and it keeps the newest 30 files in `/data/backups`:
 
 ```bash

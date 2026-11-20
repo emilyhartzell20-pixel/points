@@ -1,0 +1,25 @@
+# Render Blueprint for LeadG2 Service Points.
+# In Render: New → Blueprint → pick this repository. Render asks for the values marked sync: false.
+services:
+  - type: web
+    name: leadg2-points
+    runtime: docker
+    plan: starter            # a paid plan is required for a persistent disk
+    healthCheckPath: /healthz
+    disk:
+      name: leadg2-data
+      mountPath: /data       # the database and daily backups live here
+      sizeGB: 1
+    envVars:
+      - key: PUBLIC_URL
+        value: https://points.leadg2.com
+      - key: TRUST_PROXY
+        value: "1"
+      - key: BACKUP_DAILY
+        value: "1"
+      - key: ADMIN_EMAIL     # first admin, used once on first start
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
+      - key: HUBSPOT_PRIVATE_APP_TOKEN   # optional: shows point balances on HubSpot company records
+        sync: false
