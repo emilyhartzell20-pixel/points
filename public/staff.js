@@ -612,7 +612,59 @@ async function renderClients() {
     } catch (ex) { toast(ex.message, 'error'); }
   });
 
-  return h('div', {}, h('section', { class: 'card' }, h('h2', {}, `Clients (${clients.length})`), list), form);
+  return h('div', {}, renderFinder(), h('section', { class: 'card' }, h('h2', {}, `Clients (${clients.length})`), list), form);
+}
+
+// Find every client's points tracker in ClickUp and set them all up in one go.
+function renderFinder() {
+  const box = h('div', {});
+  const STATUS = { new: 'New client', client_exists: 'Client exists: will link', linked: 'Already linked' };
+  const scan = async (btn) => {
+    btn.disabled = true; btn.textContent = 'Scanning ClickUp…';
+    try {
+      const found = await api('/api/staff/clickup/trackers');
+      if (!found.length) { box.replaceChildren(h('p', { class: 'muted' }, 'No tracker lists found. Lists are recognized by names like "Service Point Tracking" or "Point Tracker".')); return; }
+      const rows = found.map((f) => {
+        const pick = h('input', { type: 'checkbox', checked: f.status !== 'linked', 'aria-label': `Include ${f.client_name}` });
+        const name = h('input', { value: f.client_name, 'aria-label': 'Client name', disabled: f.status === 'linked' });
+        const alloc = h('input', { type: 'number', min: '0', step: '1', value: f.allocation ?? '', placeholder: '?', class: 'pts-in', 'aria-label': 'Points allocated', disabled: f.status === 'linked' });
+        const ts = h('input', { type: 'date', 'aria-label': 'Term starts', disabled: f.status !== 'new' }); const te = h('input', { type: 'date', 'aria-label': 'Term ends', disabled: f.status !== 'new' });
+        return { f, pick, name, alloc, ts, te };
+      });
+      const go = h('button', { class: 'primary', onclick: async () => {
+        const items = rows.filter((r) => r.pick.checked).map((r) => ({ listId: r.f.list_id, listName: r.f.list_name, name: r.name.value,
+          allocation: r.alloc.value === '' ? null : Number(r.alloc.value), termStart: r.ts.value || null, termEnd: r.te.value || null }));
+        if (!items.length) return toast('Tick at least one tracker', 'error');
+        if (!confirm(`Set up ${items.length} client(s) from ClickUp? Each tracker is read and loaded (Completed = used, In Progress = committed, the rest = planned). Safe to run again.`)) return;
+        go.disabled = true; go.textContent = `Importing ${items.length}… (about 5–20 seconds each)`;
+        try {
+          const results = await api('/api/staff/clickup/trackers/import', { items });
+          box.replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, ['Client', 'Result', 'Allocated', 'Used', 'Committed', 'Planned', 'Available'].map((t) => h('th', {}, t)))),
+            h('tbody', {}, results.map((r) => h('tr', {}, h('td', {}, h('strong', {}, r.name || r.listId)),
+              h('td', { class: 'small' }, r.error ? h('span', { class: 'error' }, r.error)
+                : `${r.created ? 'Created' : 'Updated'} · ${r.found} items found, ${r.added} added${r.term ? ` · term ${fmtDate(r.term.term_start)} – ${fmtDate(r.term.term_end)} (from ${r.term.from})` : ''}${r.warning ? ` · ⚠ ${r.warning}` : ''}`),
+              ...(r.balance ? [r.balance.allocated, r.balance.used, r.balance.committed, r.balance.forecast, r.balance.available].map((n) => h('td', { class: 'num' }, String(n))) : [h('td', { colspan: 5 })]))))),
+            h('p', { class: 'muted small' }, 'Check each new client\'s contract term and agreement reference under Edit, then add their logins on Client access.'));
+          await loadClients();
+          toast('Import finished');
+        } catch (ex) { toast(ex.message, 'error'); go.disabled = false; go.textContent = 'Import selected'; }
+      } }, 'Import selected');
+      box.replaceChildren(
+        h('p', { class: 'muted small' }, `Found ${found.length} tracker list(s). Points come from the list name; leave the term blank to work it out from the tracker's month headings. Two trackers with the same client name become one client, and the second tracker's points are added to its allocation; rename one row to keep them separate.`),
+        h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
+          h('thead', {}, h('tr', {}, ['', 'Client', 'ClickUp tracker', 'Points', 'Term starts', 'Term ends', 'Status'].map((t) => h('th', {}, t)))),
+          h('tbody', {}, rows.map((r) => h('tr', {}, h('td', {}, r.pick), h('td', {}, r.name), h('td', { class: 'small' }, r.f.list_name),
+            h('td', {}, r.alloc), h('td', {}, r.ts), h('td', {}, r.te),
+            h('td', {}, h('span', { class: `status ${r.f.status === 'linked' ? 'active' : 'invited'}` }, r.f.status === 'linked' ? `Linked to ${r.f.linked_to}` : STATUS[r.f.status]))))))),
+        h('div', { class: 'actions' }, go));
+    } catch (ex) { box.replaceChildren(h('p', { class: 'error small' }, ex.message)); }
+    finally { btn.disabled = false; btn.textContent = 'Scan ClickUp again'; }
+  };
+  return h('section', { class: 'card' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Find clients in ', h('em', {}, 'ClickUp')),
+      h('button', { class: 'secondary', onclick: (e) => scan(e.target) }, 'Scan ClickUp for point trackers')),
+    h('p', { class: 'muted small' }, 'Looks through every ClickUp space for point-tracker lists (templates are skipped), then creates each client and loads its tracker in one step.'),
+    box);
 }
 
 function editClient(c) {

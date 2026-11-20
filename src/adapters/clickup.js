@@ -60,7 +60,9 @@ function normalizeTask(task) {
       point_value: num(customField(task, 'Point Value')),
       how_many: num(customField(task, 'How Many')),
       delivery_month: msToIso(customField(task, '📆 Delivery Month') || customField(task, 'Delivery Month')),
-      department: customField(task, 'Department'),
+      // Type: Questco-style trackers use Department; others use Deliverable Type or Service Point Category.
+      department: customField(task, 'Department') || customField(task, '🗂️ Deliverable Type') || customField(task, 'Deliverable Type') || customField(task, 'Service Point Category'),
+      delivery_month_name: customField(task, 'Point Delivery Month'),
       tracker_notes: customField(task, 'Notes'),
       hours: num(hoursField),
       date_created: msToIso(task.date_created),

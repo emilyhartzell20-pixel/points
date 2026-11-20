@@ -296,6 +296,13 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     const r = await ingest.importTrackerFromClickUp(db, { clientId: id, adapter: adapters.clickup, actor: user.email });
     send(res, 200, { ...r, balance: ledger.balance(db, id) });
   });
+  route('GET', '/api/staff/clickup/trackers', 'staff', async ({ res }) => send(res, 200, await ingest.findTrackers(db, adapters.clickup)));
+  route('POST', '/api/staff/clickup/trackers/import', 'staff', async ({ req, res, user }) => {
+    const { items } = await readJson(req);
+    if (!Array.isArray(items) || !items.length) throw new AppError(400, 'Choose at least one tracker');
+    if (!adapters.clickup || adapters.clickup.mode !== 'live') throw new AppError(409, 'ClickUp is not connected');
+    send(res, 200, await ingest.importTrackers(db, { items: items.slice(0, 50), adapter: adapters.clickup, actor: user.email }));
+  });
   route('GET', '/api/staff/clickup/browse', 'staff', async ({ res }) => {
     const a = adapters.clickup;
     if (!a || typeof a.listHierarchy !== 'function') throw new AppError(409, a && a.message ? a.message : 'ClickUp is not connected');
