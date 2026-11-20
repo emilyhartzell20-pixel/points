@@ -23,6 +23,32 @@ Use the **+ Add points** button in the staff console (top right, and on the Ledg
 - **Log work:** for work that never showed up in ClickUp or email, such as a call, a Teams message or a hallway request. Pick a menu item or "Custom – not on the menu", set the status (completed uses points, approved reserves them, planned is forecast only), and say how you know it was approved. Custom work and amounts outside the menu need a "why this amount" note. You can attach an optional evidence link, which stays internal. A live preview shows how the balance will change before you save. Each entry is logged with your name.
 - **Add to allocation:** for bonus points or additional purchased points. This requires a reference to the signed agreement or order form.
 
+## Editing the service menu
+
+Open the **Service menu** tab.
+- **Edit an item in place and click Save.** For a fixed price, fill in only "Points". For a range, also fill in "Up to"; the reviewer then confirms the amount. Use the blank last row to add an item.
+- **Start a new menu version** (for example at the yearly price change). Copy the current menu, adjust it, then use **Use this menu for <client>** to switch each client when their new term starts.
+- **History is safe.** Approved work keeps the amount, item and version it was approved at. Every menu change is in the audit log.
+
+## Giving a client access
+
+Open the **Client access** tab.
+1. Check the preview. It is exactly what the client sees.
+2. **Add a login** (name and email). You get a one-time link to send them; it expires in 7 days. They open it and choose their own password, so LeadG2 never sees it.
+3. Click **Turn on access**. Until then, nobody at that client can sign in.
+
+Use **Password reset link** for forgotten passwords and **Remove** to take a person's access away. Turning access off signs everyone at the client out. When the app is hosted, set `PUBLIC_URL` (e.g. `https://points.leadg2.com`) so the links point to the right address.
+
+## How it talks to ClickUp
+
+On the **Sources & sync** tab you list which ClickUp lists or spaces (paste the URL or ID) and which email domains belong to the client, and what kind of work each holds. Clicking **Sync ClickUp now** calls the ClickUp API (read-only) for tasks in those lists that changed since the last sync. It reads:
+- each task's status
+- an optional "Service Menu Item" custom field or a `menu:CODE` tag
+- an optional "Points" field
+- an optional "Hours" field for support work
+
+Emails that contain a task link or `CU-<id>` are grouped with that task. Everything lands in the Review queue as suggestions.
+
 ## Branding
 
 The colors come from the LeadG2 "Service Points 2026" one-pager in Canva: navy `#1b263b`, orange `#e17226`, slate `#50606d` and light panels `#f4f4f4`. The font is Montserrat, loaded from Google Fonts. To use the official logo instead of the text wordmark, drop `logo-white.png` (for the navy header) and `logo.png` (for the white sign-in card) into `public/brand/`.

@@ -1,5 +1,5 @@
 'use strict';
-const state = { clientId: null, tab: 'review', overview: null, clients: [] };
+const state = { clientId: null, tab: 'review', overview: null, clients: [], menuId: null };
 const panel = document.getElementById('panel');
 
 const FLAG_TEXT = {
@@ -138,7 +138,7 @@ async function act(fn, okMsg) {
 }
 
 async function render() {
-  const fn = { review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
+  const fn = { menu: renderMenu, review: renderReview, ledger: renderLedger, entry: renderEntry, sources: renderSources, preview: renderPreview, audit: renderAudit }[state.tab];
   panel.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
   try { panel.replaceChildren(await fn()); } catch (e) { panel.replaceChildren(h('p', { class: 'error' }, e.message)); }
 }
@@ -312,24 +312,180 @@ function renderSources() {
       h('p', {}, `${o.contract.agreement_ref} · term ${fmtDate(o.contract.term_start)} – ${fmtDate(o.contract.term_end)} · menu ${o.menu.version.code}`),
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
       h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${a.points} pts — ${a.source_ref} (verified by ${a.verified_by})`)))),
-    h('section', { class: 'card' }, h('h2', {}, 'Client-to-source mappings'),
-      h('table', {}, h('thead', {}, h('tr', {}, ['Type', 'Value', 'Scope', 'Label'].map((t) => h('th', {}, t)))),
-        h('tbody', {}, o.mappings.map((m) => h('tr', {}, h('td', {}, m.source_type), h('td', {}, m.value), h('td', {}, m.scope), h('td', {}, m.label || '')))))));
+    renderMappings(o));
 }
 
+const MAP_TYPE_TEXT = { clickup_space: 'ClickUp space', clickup_list: 'ClickUp list', email_domain: 'Email domain', email_address: 'Email address' };
+const SCOPE_TEXT = { points: 'Points work', consulting: 'Monthly consulting (flag, no points)', project: 'Fixed-scope project (flag, no points)', support_hours: 'HubSpot support hours (hours, not points)' };
+
+function renderMappings(o) {
+  const type = h('select', {}, Object.entries(MAP_TYPE_TEXT).map(([k, t]) => h('option', { value: k }, t)));
+  const value = h('input', { placeholder: 'Paste the ClickUp list URL or ID', required: true });
+  const scope = h('select', {}, Object.entries(SCOPE_TEXT).map(([k, t]) => h('option', { value: k }, t)));
+  const label = h('input', { placeholder: 'e.g. Harbor Point – Points work' });
+  type.addEventListener('change', () => {
+    value.placeholder = { clickup_space: 'Paste the ClickUp space URL or ID', clickup_list: 'Paste the ClickUp list URL or ID', email_domain: 'clientname.com', email_address: 'person@clientname.com' }[type.value];
+  });
+  const form = h('form', {},
+    h('div', { class: 'row' }, h('label', {}, 'Source', type), h('label', {}, 'Which one', value)),
+    h('div', { class: 'row' }, h('label', {}, 'What kind of work is in it', scope), h('label', {}, 'Label (optional)', label)),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add source')));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    act(() => api(`/api/staff/clients/${state.clientId}/mappings`, { sourceType: type.value, value: value.value, scope: scope.value, label: label.value }), 'Source added');
+  });
+  const live = Object.values(o.connector_mode).every((m) => m === 'live');
+  return h('div', {},
+    h('section', { class: 'card' }, h('h2', {}, `Where ${o.client.name}'s work comes from`),
+      h('p', { class: 'muted small' }, 'The app only reads the ClickUp lists/spaces and email addresses listed here. Anything else is ignored, and emails that merely mention the client by name go to "Uncertain client matches" for a person to decide.'),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, ['Source', 'Which one', 'Kind of work', 'Label', ''].map((t) => h('th', {}, t)))),
+        h('tbody', {}, o.mappings.map((m) => h('tr', {},
+          h('td', {}, MAP_TYPE_TEXT[m.source_type]), h('td', {}, m.value), h('td', {}, SCOPE_TEXT[m.scope]), h('td', {}, m.label || ''),
+          h('td', { class: 'row-actions' }, h('button', { class: 'danger', onclick: () => {
+            if (!confirm(`Stop reading ${MAP_TYPE_TEXT[m.source_type]} ${m.value} for this client? Evidence already imported stays.`)) return;
+            act(() => api(`/api/staff/clients/${state.clientId}/mappings/${m.id}/remove`, {}), 'Source removed');
+          } }, 'Remove'))))))),
+      h('h3', {}, 'Add a source'), form),
+    h('section', { class: 'card explain' }, h('h2', {}, 'How the ClickUp connection works'),
+      h('p', { class: 'small' }, live ? 'Connected to live ClickUp and Outlook.' : 'Right now the app is reading built-in SAMPLE data, not your real ClickUp or Outlook. Switching to live is a server setting (see README).'),
+      h('ol', { class: 'small' },
+        h('li', {}, 'When you click "Sync ClickUp now", the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads; it can never change a task.'),
+        h('li', {}, 'For each task it notes the status (to do, in progress, complete, canceled), plus these optional task fields: a "Service Menu Item" custom field or a tag like menu:LP-BUILD, a "Points" custom field, and an "Hours" field for support work. Subtasks roll up into their parent task.'),
+        h('li', {}, 'Emails that contain the task link (app.clickup.com/t/…) or its ID (CU-…) are grouped with that task, so one deliverable becomes one suggestion.'),
+        h('li', {}, 'It turns what it found into suggestions in the Review queue. Nothing changes the balance until a consultant approves.'))));
+}
 // ------------------------------------------------------------------ preview & access
 async function renderPreview() {
-  const v = await api(`/api/staff/clients/${state.clientId}/preview`);
+  const [v, users] = await Promise.all([api(`/api/staff/clients/${state.clientId}/preview`), api(`/api/staff/clients/${state.clientId}/users`)]);
   const c = state.overview.client;
+  const STATUS = { active: 'Active', invited: 'Invite sent', invite_expired: 'Link expired' };
+
+  // Shows a freshly created one-time link with a copy button. The link is only shown once.
+  const linkBox = h('div', {});
+  const showLink = (who, r) => {
+    const input = h('input', { value: r.link, readonly: true, 'aria-label': 'Setup link' });
+    linkBox.replaceChildren(h('div', { class: 'card warn' },
+      h('strong', {}, `Send this link to ${who}`),
+      h('p', { class: 'small' }, `They open it, choose their own password, then sign in. It works once and expires ${fmtDate(r.expires_at)}. Copy it now: for security it isn't shown again (you can always make a new one).`),
+      h('div', { class: 'invite-link' }, input, h('button', { class: 'primary', onclick: async () => {
+        input.select();
+        try { await navigator.clipboard.writeText(r.link); toast('Link copied'); } catch { document.execCommand('copy'); toast('Link copied'); }
+      } }, 'Copy link'))));
+  };
+
+  const name = h('input', { placeholder: 'e.g. Dana Reyes', required: true });
+  const email = h('input', { type: 'email', placeholder: 'dana@client.com', required: true });
+  const addForm = h('form', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Email', email),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add login & get link')));
+  addForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api(`/api/staff/clients/${state.clientId}/users`, { name: name.value, email: email.value });
+      state.pendingLink = { who: name.value, r }; await render();
+    } catch (ex) { toast(ex.message, 'error'); }
+  });
+
+  if (state.pendingLink) { showLink(state.pendingLink.who, state.pendingLink.r); state.pendingLink = null; }
+  const logins = h('section', { class: 'card' },
+    h('h2', {}, 'Client logins'),
+    h('ol', { class: 'small steps' },
+      h('li', {}, 'Check the preview below: it is exactly what the client will see.'),
+      h('li', {}, 'Add a login for each person at the client. You get a one-time link to send them (email, Teams, etc.).'),
+      h('li', {}, 'Turn on dashboard access. Until it is on, nobody at this client can sign in, even with a password.')),
+    users.length ? h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Name', 'Email', 'Status', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, users.map((u) => h('tr', {},
+        h('td', {}, u.name), h('td', {}, u.email), h('td', {}, h('span', { class: `status ${u.status}` }, STATUS[u.status])),
+        h('td', { class: 'row-actions' },
+          h('button', { onclick: async () => {
+            try { showLink(u.name, await api(`/api/staff/clients/${state.clientId}/users/${u.id}/link`, {})); } catch (ex) { toast(ex.message, 'error'); }
+          } }, u.status === 'active' ? 'Password reset link' : 'New link'),
+          h('button', { class: 'danger', onclick: () => {
+            if (!confirm(`Remove ${u.name}'s login? They will be signed out immediately.`)) return;
+            act(() => api(`/api/staff/clients/${state.clientId}/users/${u.id}/remove`, {}), 'Login removed');
+          } }, 'Remove'))))))) : h('p', { class: 'muted' }, 'No logins yet.'),
+    linkBox,
+    h('h3', {}, 'Add a login'), addForm);
+
   return h('div', {},
     h('section', { class: 'card access' },
-      h('div', {}, h('strong', {}, c.portal_enabled ? 'Client access is ON' : 'Client access is OFF'),
-        h('p', { class: 'muted small' }, 'Below is exactly what the client sees (same server function, same fields).')),
+      h('div', {}, h('strong', {}, c.portal_enabled ? 'Dashboard access is ON' : 'Dashboard access is OFF'),
+        h('p', { class: 'muted small' }, c.portal_enabled ? `${users.filter((u) => u.status === 'active').length} active login(s) can see the dashboard below.` : 'Nobody at this client can sign in yet.')),
       h('button', { class: c.portal_enabled ? 'danger' : 'primary', onclick: () => {
-        if (!confirm(c.portal_enabled ? 'Revoke client access and sign out their sessions?' : 'Grant this client access to the dashboard shown below?')) return;
-        act(() => api(`/api/staff/clients/${state.clientId}/portal`, { enabled: !c.portal_enabled }), c.portal_enabled ? 'Access revoked' : 'Access granted');
-      } }, c.portal_enabled ? 'Revoke access' : 'Grant access')),
+        if (!confirm(c.portal_enabled ? 'Turn off access and sign out everyone at this client?' : 'Turn on access? Everyone with a login at this client will be able to see the dashboard below.')) return;
+        act(() => api(`/api/staff/clients/${state.clientId}/portal`, { enabled: !c.portal_enabled }), c.portal_enabled ? 'Access turned off' : 'Access turned on');
+      } }, c.portal_enabled ? 'Turn off access' : 'Turn on access')),
+    logins,
+    h('h2', { class: 'preview-title' }, 'What the client sees'),
     h('div', { class: 'preview-frame' }, renderClientView(v)));
+}
+
+// ------------------------------------------------------------------ service menu editor
+async function renderMenu() {
+  const menus = await api('/api/staff/menus');
+  const clientVersionId = state.overview.contract.menu_version_id;
+  if (!menus.some((m) => m.id === state.menuId)) state.menuId = clientVersionId;
+  const v = menus.find((m) => m.id === state.menuId) || menus[0];
+  const clientName = state.overview.client.name;
+  const range = (i) => (i.points_min === i.points_max ? `${i.points_min}` : `${i.points_min}–${i.points_max}`);
+
+  const picker = h('select', { onchange: (e) => { state.menuId = Number(e.target.value); render(); } },
+    menus.map((m) => h('option', { value: m.id, selected: m.id === v.id }, `${m.code} · ${m.name}${m.clients.length ? ` (used by ${m.clients.map((c) => c.name).join(', ')})` : ''}`)));
+
+  // Version details
+  const vName = h('input', { value: v.name }); const vDate = h('input', { type: 'date', value: v.effective_date });
+  const details = h('section', { class: 'card' },
+    h('div', { class: 'toolbar' }, h('h2', {}, `Menu ${v.code}`),
+      v.id === clientVersionId ? h('span', { class: 'badge st-committed' }, `${clientName} uses this menu`)
+        : h('button', { class: 'secondary', onclick: () => {
+          if (!confirm(`Switch ${clientName} to menu ${v.code}?\n\nNew suggestions and entries will use these prices. Work already approved keeps its original points.`)) return;
+          act(() => api(`/api/staff/clients/${state.clientId}/menu`, { versionId: v.id }), `${clientName} now uses ${v.code}`);
+        } }, `Use this menu for ${clientName}`)),
+    h('div', { class: 'hint' }, 'Editing a menu never changes points already approved: each approved item keeps the amount it was approved at. Changes apply to new suggestions and entries. Every change is recorded in the audit log.'),
+    h('div', { class: 'row' }, h('label', {}, 'Menu name', vName), h('label', {}, 'Takes effect', vDate),
+      h('div', { class: 'actions' }, h('button', { onclick: () => act(() => api(`/api/staff/menus/${v.id}`, { name: vName.value, effectiveDate: vDate.value }), 'Menu details saved') }, 'Save details'))),
+    h('p', { class: 'muted small' }, `${v.items.length} items · ${v.approved_work_items} approved work items reference this version`));
+
+  // Items table
+  const itemRow = (i) => {
+    const f = {
+      name: h('input', { value: i ? i.name : '', placeholder: 'e.g. Landing page build', 'aria-label': 'Name' }),
+      code: h('input', { value: i ? i.code : '', placeholder: 'LP-BUILD', size: '10', 'aria-label': 'Short code' }),
+      min: h('input', { type: 'number', min: '0', step: '1', value: i ? i.points_min : '', class: 'pts-in', 'aria-label': 'Points (min)' }),
+      max: h('input', { type: 'number', min: '0', step: '1', value: i && i.points_max !== i.points_min ? i.points_max : '', placeholder: 'same', class: 'pts-in', 'aria-label': 'Points (max, for ranges)' }),
+      keywords: h('input', { value: i ? i.keywords.join(', ') : '', placeholder: 'landing page, lp', 'aria-label': 'Matching keywords' }),
+      notes: h('input', { value: i ? (i.notes || '') : '', placeholder: 'optional', 'aria-label': 'Notes' }),
+    };
+    const save = () => act(() => api(`/api/staff/menus/${v.id}/items`, { itemId: i ? i.id : null, name: f.name.value, code: f.code.value,
+      pointsMin: f.min.value, pointsMax: f.max.value, keywords: f.keywords.value, notes: f.notes.value }), i ? 'Item saved' : 'Item added');
+    return h('tr', { class: i ? '' : 'new-row' },
+      h('td', {}, f.name), h('td', {}, f.code), h('td', {}, f.min), h('td', {}, f.max), h('td', {}, f.keywords), h('td', {}, f.notes),
+      h('td', { class: 'row-actions' }, h('button', { class: i ? '' : 'primary', onclick: save }, i ? 'Save' : '+ Add'),
+        i ? h('button', { class: 'danger', onclick: () => {
+          if (!confirm(`Remove "${i.name}" from menu ${v.code}? Work already approved with it is not affected.`)) return;
+          act(() => api(`/api/staff/menus/${v.id}/items/${i.id}/delete`, {}), 'Item removed');
+        } }, 'Remove') : null));
+  };
+  const items = h('section', { class: 'card' }, h('h2', {}, 'Menu items'),
+    h('p', { class: 'muted small' }, 'For a fixed price, fill in only "Points". For a range (reviewer confirms the amount), also fill in "Up to". Keywords help the app recognize the item in ClickUp tasks and emails.'),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
+      h('thead', {}, h('tr', {}, ['Item', 'Code', 'Points', 'Up to', 'Keywords', 'Notes', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, v.items.map(itemRow), itemRow(null)))));
+
+  // New version
+  const nCode = h('input', { placeholder: 'e.g. 2027.1', required: true }); const nName = h('input', { placeholder: 'LeadG2 Service Point Menu 2027.1' });
+  const nDate = h('input', { type: 'date', required: true }); const nCopy = h('input', { type: 'checkbox', checked: true });
+  const newVersion = h('section', { class: 'card' }, h('h2', {}, 'Start a new menu version'),
+    h('p', { class: 'muted small' }, 'Use this for a yearly price change: copy the current menu, adjust it, then switch clients over when their new term starts. Clients on the old menu are unaffected until you switch them.'),
+    h('div', { class: 'row' }, h('label', {}, 'Version label', nCode), h('label', {}, 'Name', nName), h('label', {}, 'Takes effect', nDate)),
+    h('label', { class: 'check' }, nCopy, `Start with a copy of every item in ${v.code}`),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(async () => {
+      const created = await api('/api/staff/menus', { code: nCode.value, name: nName.value, effectiveDate: nDate.value, copyFromId: nCopy.checked ? v.id : null });
+      state.menuId = created.id;
+    }, 'New menu version created') }, 'Create version')));
+
+  return h('div', {}, h('div', { class: 'card' }, h('label', {}, 'Menu version', picker)), details, items, newVersion);
 }
 
 async function renderAudit() {

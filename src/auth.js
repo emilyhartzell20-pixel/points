@@ -50,4 +50,31 @@ function publicUser(u) {
   return { id: u.id, email: u.email, name: u.name, role: u.role, client_id: u.client_id };
 }
 
-module.exports = { createUser, login, logout, userForToken, hashPassword, verifyPassword };
+const INVITE_DAYS = 7;
+
+/** Create a one-time link token for a user to set their password. Older unused links stop working. */
+function createInvite(db, { userId, actor }) {
+  db.prepare('UPDATE invites SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(new Date().toISOString(), userId);
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expires = new Date(Date.now() + INVITE_DAYS * 86400e3).toISOString();
+  db.prepare('INSERT INTO invites (token_hash, user_id, created_by, expires_at) VALUES (?,?,?,?)').run(tokenHash(token), userId, actor, expires);
+  return { token, expires_at: expires };
+}
+
+function inviteInfo(db, token) {
+  const row = db.prepare(`SELECT i.*, u.email, u.name FROM invites i JOIN users u ON u.id = i.user_id WHERE i.token_hash = ?`).get(tokenHash(String(token || '')));
+  if (!row || row.used_at || row.expires_at < new Date().toISOString()) return null;
+  return row;
+}
+
+function acceptInvite(db, { token, password }) {
+  const inv = inviteInfo(db, token);
+  if (!inv) return { ok: false, error: 'This link has expired or was already used. Ask your LeadG2 consultant for a new one.' };
+  if (String(password || '').length < 10) return { ok: false, error: 'Choose a password with at least 10 characters.' };
+  db.prepare('UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ?').run(hashPassword(password), inv.user_id);
+  db.prepare('UPDATE invites SET used_at = ? WHERE token_hash = ?').run(new Date().toISOString(), inv.token_hash);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(inv.user_id);
+  return { ok: true, email: inv.email };
+}
+
+module.exports = { createInvite, inviteInfo, acceptInvite, createUser, login, logout, userForToken, hashPassword, verifyPassword };

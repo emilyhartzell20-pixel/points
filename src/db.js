@@ -225,7 +225,16 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL CHECK (role IN ('staff','client')),
   client_id INTEGER REFERENCES clients(id),
   password_hash TEXT NOT NULL,
+  password_set INTEGER NOT NULL DEFAULT 1,  -- 0 until an invited user chooses their password
   CHECK ((role = 'client') = (client_id IS NOT NULL))
+);
+-- One-time links that let an invited client choose their own password (staff never see it).
+CREATE TABLE IF NOT EXISTS invites (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_by TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
@@ -239,7 +248,16 @@ function openDb(file) {
   if (target !== ':memory:') fs.mkdirSync(path.dirname(target), { recursive: true });
   const db = new DatabaseSync(target);
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// Additive migrations for databases created by earlier versions.
+function migrate(db) {
+  const has = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+  if (!has('users', 'password_set')) db.exec('ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1');
+  if (!has('clients', 'pilot')) db.exec('ALTER TABLE clients ADD COLUMN pilot INTEGER NOT NULL DEFAULT 0');
+  if (!has('suggestions', 'evidence_date')) db.exec('ALTER TABLE suggestions ADD COLUMN evidence_date TEXT');
 }
 
 // Run fn inside a transaction (nested calls join the outer one).

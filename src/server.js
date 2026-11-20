@@ -10,6 +10,7 @@ const ledger = require('./ledger');
 const review = require('./review');
 const ingest = require('./ingest');
 const importer = require('./importer');
+const admin = require('./admin');
 const { clientDashboard } = require('./clientView');
 const { menuForClient } = require('./menu');
 const { SampleClickUp, LiveClickUp } = require('./adapters/clickup');
@@ -153,6 +154,66 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
     const id = clientExists(int(p.id)); const b = await readJson(req);
     send(res, 200, ledger.addAllocation(db, { clientId: id, kind: b.kind, points: Number(b.points), sourceRef: b.sourceRef, note: b.note, actor: user.email }));
   });
+  // ---- service point menu
+  route('GET', '/api/staff/menus', 'staff', ({ res }) => send(res, 200, admin.listMenus(db)));
+  route('POST', '/api/staff/menus', 'staff', async ({ req, res, user }) => {
+    const b = await readJson(req);
+    send(res, 200, admin.createMenuVersion(db, { code: b.code, name: b.name, effectiveDate: b.effectiveDate, copyFromId: b.copyFromId ? int(b.copyFromId) : null, actor: user.email }));
+  });
+  route('POST', '/api/staff/menus/:vid', 'staff', async ({ req, res, p, user }) => {
+    const b = await readJson(req);
+    send(res, 200, admin.updateMenuVersion(db, { id: int(p.vid), name: b.name, effectiveDate: b.effectiveDate, actor: user.email }));
+  });
+  route('POST', '/api/staff/menus/:vid/items', 'staff', async ({ req, res, p, user }) => {
+    const b = await readJson(req);
+    send(res, 200, admin.saveMenuItem(db, { ...b, versionId: int(p.vid), itemId: b.itemId ? int(b.itemId) : null, actor: user.email }));
+  });
+  route('POST', '/api/staff/menus/:vid/items/:iid/delete', 'staff', async ({ res, p, user }) => {
+    admin.deleteMenuItem(db, { versionId: int(p.vid), itemId: int(p.iid), actor: user.email }); send(res, 200, { ok: true });
+  });
+  route('POST', '/api/staff/clients/:id/menu', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    send(res, 200, admin.assignMenu(db, { clientId: id, versionId: int(b.versionId), actor: user.email }));
+  });
+
+  // ---- client logins (invite links: the client chooses their own password)
+  const inviteLink = (req, token) => {
+    const base = process.env.PUBLIC_URL || `${secureCookies ? 'https' : 'http'}://${req.headers.host}`;
+    return `${base.replace(/\/$/, '')}/setup#t=${token}`; // fragment: never sent to servers or logs
+  };
+  route('GET', '/api/staff/clients/:id/users', 'staff', ({ res, p }) => send(res, 200, admin.listClientUsers(db, clientExists(int(p.id)))));
+  route('POST', '/api/staff/clients/:id/users', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    const r = admin.inviteClientUser(db, { clientId: id, email: b.email, name: b.name, actor: user.email });
+    send(res, 200, { userId: r.userId, link: inviteLink(req, r.token), expires_at: r.expires_at });
+  });
+  route('POST', '/api/staff/clients/:id/users/:uid/link', 'staff', async ({ req, res, p, user }) => {
+    const r = admin.newClientLink(db, { clientId: clientExists(int(p.id)), userId: int(p.uid), actor: user.email });
+    send(res, 200, { link: inviteLink(req, r.token), expires_at: r.expires_at });
+  });
+  route('POST', '/api/staff/clients/:id/users/:uid/remove', 'staff', async ({ res, p, user }) => {
+    admin.removeClientUser(db, { clientId: clientExists(int(p.id)), userId: int(p.uid), actor: user.email }); send(res, 200, { ok: true });
+  });
+  route('POST', '/api/invite/check', null, async ({ req, res }) => {
+    const { token } = await readJson(req); const inv = auth.inviteInfo(db, token);
+    if (!inv) throw new AppError(410, 'This link has expired or was already used. Ask your LeadG2 consultant for a new one.');
+    send(res, 200, { name: inv.name, email: inv.email });
+  });
+  route('POST', '/api/invite/accept', null, async ({ req, res }) => {
+    const r = auth.acceptInvite(db, await readJson(req));
+    if (!r.ok) throw new AppError(400, r.error);
+    send(res, 200, r);
+  });
+
+  // ---- source mappings
+  route('POST', '/api/staff/clients/:id/mappings', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    send(res, 200, admin.addMapping(db, { clientId: id, sourceType: b.sourceType, value: b.value, scope: b.scope, label: b.label, actor: user.email }));
+  });
+  route('POST', '/api/staff/clients/:id/mappings/:mid/remove', 'staff', async ({ res, p, user }) => {
+    admin.removeMapping(db, { clientId: clientExists(int(p.id)), mappingId: int(p.mid), actor: user.email }); send(res, 200, { ok: true });
+  });
+
   route('GET', '/api/staff/match-queue', 'staff', ({ res }) => send(res, 200, ingest.matchQueue(db)));
   route('POST', '/api/staff/match-queue/:rid', 'staff', async ({ req, res, p, user }) => {
     const b = await readJson(req);
@@ -177,7 +238,7 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
   });
 
   // ---- pages
-  const pages = { '/': 'login.html', '/login': 'login.html', '/staff': 'staff.html', '/client': 'client.html' };
+  const pages = { '/': 'login.html', '/login': 'login.html', '/staff': 'staff.html', '/client': 'client.html', '/setup': 'setup.html' };
 
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');

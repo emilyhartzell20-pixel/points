@@ -164,3 +164,16 @@ dialog.add-points::backdrop { background: rgba(27, 38, 59, .55); }
   .site-footer { padding: 10px 16px; }
 }
 .card .toolbar h2 { color: var(--accent); margin: 0; }
+.menu-table input { width: 100%; min-width: 0; }
+.menu-table td { padding: 4px 6px; }
+.menu-table td:first-child { min-width: 200px; white-space: normal; }
+.menu-table .pts-in { width: 72px; }
+.menu-table tr.new-row td { border-top: 2px dashed var(--line); }
+.invite-link { display: flex; gap: 8px; margin-top: 8px; }
+.invite-link input { flex: 1; font-family: ui-monospace, monospace; font-size: .8rem; }
+.status { font-size: .75rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.status.active { background: #e3f3ea; color: var(--ok); }
+.status.invited { background: var(--warn-bg); color: var(--lg-orange-dark); }
+.status.invite_expired { background: #fbe5e3; color: var(--err); }
+.explain ol { padding-left: 20px; margin: 6px 0; } .explain li { margin: 4px 0; }
+.preview-title { margin: 22px 0 8px; } .steps { margin: 0 0 12px; padding-left: 20px; }
