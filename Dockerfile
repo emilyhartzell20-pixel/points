@@ -9,6 +9,7 @@ COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
 COPY data/sample ./data/sample
+COPY data/menus ./data/menus
 # The database lives on a persistent volume mounted at /data.
 RUN mkdir -p /data && chown node:node /data
 USER node

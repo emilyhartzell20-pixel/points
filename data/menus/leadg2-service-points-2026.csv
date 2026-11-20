@@ -1,0 +1,41 @@
+code,name,points_min,points_max,category,keywords,notes
+AUDIT,"Audit (SEO, AEO, keyword, social, etc.)",3,3,Consulting & Support,"audit, seo audit, aeo audit, keyword audit, social audit",
+CALL,Additional call,2,2,Consulting & Support,"additional call, extra call",
+HS-SUPPORT-HR,HubSpot support hour,1,1,Consulting & Support,"support hour, hubspot support",Per hour
+HS-REPORT,Custom HubSpot report,2,2,Consulting & Support,"custom report, hubspot report, dashboard report",
+SURVEY,Survey,4,4,Consulting & Support,"survey",
+PERSONA,Target persona profile,4,4,Consulting & Support,"persona, target persona",
+STYLE-GUIDE,Style guide,6,6,Consulting & Support,"style guide, brand guide",
+BLOG,Blog post creation,4,5,Content/Promotion,"blog post, blog article, blog",
+BLOG-PUBLISH,HubSpot publishing of a blog post,1,1,Content/Promotion,"publish blog, blog publishing",Add-on to a blog post
+SOCIAL-2,2 social media posts,1,1,Content/Promotion,"social media posts, social posts",
+MKT-EMAIL,Marketing email,4,4,Content/Promotion,"marketing email, newsletter email, promo email",
+POPUP,Pop-up form,1,1,Content/Promotion,"pop-up form, popup",
+LP,Landing page,3,3,Content/Promotion,"landing page",
+LP-FULL,"Landing page with thank-you page & email",5,5,Content/Promotion,"landing page with thank you, thank you page",Total for the bundle
+FAQ-PAGE,FAQ website page,10,10,Content/Promotion,"faq page, faq",
+WEB-COPY,Website page copy,6,6,Content/Promotion,"website copy, page copy, web copy",
+WEB-MODULE,New website module,3,10,Content/Promotion,"website module, new module",Confirm amount by complexity
+BATTLECARD,Competitor battle-card,4,6,Content/Promotion,"battle card, battlecard, competitor",
+LI-NEWSLETTER,LinkedIn newsletter,3,3,Content/Promotion,"linkedin newsletter",
+GRAPHIC,Custom graphic,1,1,Content/Promotion,"graphic, custom graphic",
+ONE-SHEET,One-sheet,6,10,Content/Promotion,"one-sheet, one sheet, sell sheet",
+VIDEO-30,Video (:30),7,7,Content/Promotion,"30 second video, :30 video",
+VIDEO-60,Video (:60),9,9,Content/Promotion,"60 second video, :60 video",
+VIDEO-90,Video (:90),11,11,Content/Promotion,"90 second video, :90 video",
+CASE-STUDY,Case study,6,9,Content/Promotion,"case study",
+EBOOK,eBook,8,13,Content/Promotion,"ebook, e-book",
+INTERACTIVE,Interactive premium content,5,10,Content/Promotion,"interactive content, quiz, calculator, assessment",
+PILLAR,Pillar page,10,10,Content/Promotion,"pillar page",
+PPT,PowerPoint presentation,8,10,Content/Promotion,"powerpoint, presentation, deck",
+PPT-SCRIPT,PowerPoint presentation with script,10,12,Content/Promotion,"presentation with script, script",Total for the bundle
+PRESS,Press release,4,4,Content/Promotion,"press release",
+PRESS-PROMO,"Press release with email and social promotion",5,5,Content/Promotion,"press release promotion",Total for the bundle
+AEO-PROFILES,"3rd-party profiles for AEO (G2, Glassdoor, Wikipedia, etc.)",3,3,Content/Promotion,"g2, glassdoor, wikipedia, third party profile, aeo profile",
+SALES-EMAIL,Sales email in a sequence,1,1,Sales,"sales email, sequence email",Per email
+PROPOSAL-TPL,Sales proposal template,8,8,Sales,"proposal template, sales proposal",
+SALES-TRAINING,HubSpot Sales Hub tools training,2,2,Sales,"sales hub training, sales tools training",
+SELLER-LP,Personalized seller landing page,4,4,Sales,"seller landing page, personalized landing page",
+LI-TRAINING,LinkedIn thought-leadership training,3,3,Sales,"linkedin training, thought leadership",
+AMBASSADOR-2,2 brand ambassador social posts,1,1,Sales,"brand ambassador, ambassador posts",
+SALES-REPORT,HubSpot sales report,2,2,Sales,"sales report",

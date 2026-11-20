@@ -314,5 +314,52 @@ function listClientsAdmin(db) {
     ORDER BY c.pilot DESC, c.name`).all().map((c) => ({ ...c, aliases: JSON.parse(c.aliases) }));
 }
 
-module.exports = { listStaff, inviteStaff, newStaffLink, removeStaff, createClient, updateClient, listClientsAdmin, listMenus, createMenuVersion, updateMenuVersion, saveMenuItem, deleteMenuItem, assignMenu,
+// ------------------------------------------------------------------ menu import (CSV)
+const MENU_TEMPLATES = {
+  'leadg2-2026': { file: 'leadg2-service-points-2026.csv', code: '2026', name: 'LeadG2 Service Points 2026', effectiveDate: '2026-01-01' },
+};
+
+/**
+ * Add or update menu items from a CSV with columns: code, name, points_min, points_max, category, keywords, notes.
+ * Rows are matched by code, so re-importing an updated file changes prices without duplicating items.
+ */
+function importMenuCsv(db, { versionId, csv, actor }) {
+  const { parseCsv } = require('./importer');
+  getVersion(db, versionId);
+  const rows = parseCsv(csv);
+  if (!rows.length) throw new AppError(400, 'The file has no rows');
+  for (const col of ['name', 'points_min']) if (!(col in rows[0])) throw new AppError(400, `Missing column: ${col}`);
+  return tx(db, () => {
+    let added = 0, updated = 0;
+    for (const r of rows) {
+      const code = (r.code || r.name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+      const existing = db.prepare('SELECT id FROM menu_items WHERE menu_version_id = ? AND code = ?').get(versionId, code);
+      const notes = [r.category, r.notes].map((x) => (x || '').trim()).filter(Boolean).join(' · ') || null;
+      try {
+        saveMenuItem(db, { versionId, itemId: existing ? existing.id : null, code, name: r.name, pointsMin: r.points_min,
+          pointsMax: r.points_max || r.points_min, keywords: r.keywords, notes, actor });
+      } catch (e) { throw new AppError(400, `Line ${r.__line} (${r.name || code}): ${e.message}`); }
+      if (existing) updated++; else added++;
+    }
+    audit(db, { actor, action: 'menu.import', entity: 'menu_version', entityId: versionId, detail: { added, updated } });
+    return { added, updated };
+  });
+}
+
+/** Create a menu version from a bundled template (e.g. the LeadG2 2026 menu). */
+function createMenuFromTemplate(db, { template, actor }) {
+  const t = MENU_TEMPLATES[template];
+  if (!t) throw new AppError(404, 'Unknown menu template');
+  const fs = require('node:fs'); const path = require('node:path');
+  const csv = fs.readFileSync(path.join(__dirname, '..', 'data', 'menus', t.file), 'utf8');
+  let code = t.code; let n = 2;
+  while (db.prepare('SELECT 1 FROM menu_versions WHERE code = ?').get(code)) code = `${t.code}-${n++}`;
+  return tx(db, () => {
+    const v = createMenuVersion(db, { code, name: t.name, effectiveDate: t.effectiveDate, actor });
+    const r = importMenuCsv(db, { versionId: v.id, csv, actor });
+    return { ...v, ...r };
+  });
+}
+
+module.exports = { importMenuCsv, createMenuFromTemplate, listStaff, inviteStaff, newStaffLink, removeStaff, createClient, updateClient, listClientsAdmin, listMenus, createMenuVersion, updateMenuVersion, saveMenuItem, deleteMenuItem, assignMenu,
   listClientUsers, inviteClientUser, newClientLink, removeClientUser, addMapping, removeMapping };

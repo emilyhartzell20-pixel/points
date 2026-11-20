@@ -81,6 +81,24 @@ class LiveClickUp {
     for (const f of folders.folders || []) for (const l of f.lists || []) ids.push(String(l.id));
     return ids;
   }
+  /** Workspaces → spaces → lists, so staff can pick lists instead of pasting IDs. Read-only. */
+  async listHierarchy() {
+    const out = [];
+    const teams = await this.get('/team');
+    for (const t of teams.teams || []) {
+      const spaces = await this.get(`/team/${encodeURIComponent(t.id)}/space?archived=false`);
+      for (const sp of spaces.spaces || []) {
+        const lists = [];
+        const loose = await this.get(`/space/${encodeURIComponent(sp.id)}/list?archived=false`);
+        for (const l of loose.lists || []) lists.push({ id: String(l.id), name: l.name, folder: null });
+        const folders = await this.get(`/space/${encodeURIComponent(sp.id)}/folder?archived=false`);
+        for (const f of folders.folders || []) for (const l of f.lists || []) lists.push({ id: String(l.id), name: l.name, folder: f.name });
+        out.push({ workspace: t.name, space: { id: String(sp.id), name: sp.name }, lists });
+      }
+    }
+    return out;
+  }
+
   async fetchTasks({ mappings, since }) {
     const listIds = new Set(mappings.filter((m) => m.source_type === 'clickup_list').map((m) => m.value));
     for (const m of mappings.filter((x) => x.source_type === 'clickup_space')) {
@@ -107,4 +125,11 @@ async function fetchClickUp(adapter, ctx) {
   return tasks.map(normalizeTask);
 }
 
-module.exports = { normalizeTask, SampleClickUp, LiveClickUp, fetchClickUp };
+/** Used in production until a ClickUp key is configured: never falls back to sample data. */
+class NotConnected {
+  constructor(what, howTo) { this.mode = 'not_connected'; this.message = `${what} isn't connected yet. ${howTo}`; }
+  async fetchTasks() { throw new Error(this.message); }
+  async fetchMessages() { throw new Error(this.message); }
+}
+
+module.exports = { NotConnected, normalizeTask, SampleClickUp, LiveClickUp, fetchClickUp };

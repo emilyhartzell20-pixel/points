@@ -21,9 +21,20 @@ const { SampleOutlook, LiveOutlook } = require('./adapters/outlook');
 const PUBLIC = path.join(__dirname, '..', 'public');
 const COOKIE = 'lg2_session';
 
-function defaultAdapters() {
-  const live = process.env.CONNECTOR_MODE === 'live';
-  return { clickup: live ? new LiveClickUp() : new SampleClickUp(), outlook: live ? new LiveOutlook() : new SampleOutlook() };
+/**
+ * Sample data only in the demo (or when CONNECTOR_MODE=sample). Otherwise each connector is live as soon
+ * as its credentials are set on the server, and clearly "not connected" until then.
+ */
+function defaultAdapters({ demo = false } = {}) {
+  if (demo || process.env.CONNECTOR_MODE === 'sample') return { clickup: new SampleClickUp(), outlook: new SampleOutlook() };
+  const { NotConnected } = require('./adapters/clickup');
+  const outlookReady = process.env.OUTLOOK_ACCESS_TOKEN || (process.env.MS_TENANT_ID && process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET);
+  return {
+    clickup: process.env.CLICKUP_API_TOKEN ? new LiveClickUp()
+      : new NotConnected('ClickUp', 'Add your ClickUp API token as CLICKUP_API_TOKEN in Render → leadg2-points → Environment.'),
+    outlook: outlookReady ? new LiveOutlook()
+      : new NotConnected('Outlook', 'It needs a Microsoft 365 app registration with read-only mail access (see DEPLOY.md, section 6).'),
+  };
 }
 
 function parseCookies(h) {
@@ -60,7 +71,8 @@ function serveStatic(res, file) {
   send(res, 200, fs.readFileSync(p), { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
 }
 
-function createApp({ db, adapters = defaultAdapters(), secureCookies = process.env.NODE_ENV === 'production', demo = false, hubspot = new HubSpotSync() } = {}) {
+function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV === 'production', demo = false, hubspot = new HubSpotSync() } = {}) {
+  adapters = adapters || defaultAdapters({ demo });
   // Sign-in throttle: at most 10 failed attempts per email and per IP in 15 minutes.
   const failures = new Map();
   const WINDOW = 15 * 60e3, LIMIT = 10;
@@ -175,6 +187,11 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
     send(res, 200, ledger.addAllocation(db, { clientId: id, kind: b.kind, points: Number(b.points), sourceRef: b.sourceRef, note: b.note, actor: user.email }));
   });
   // ---- service point menu
+  route('POST', '/api/staff/menu-templates/:tpl', 'staff', async ({ res, p, user }) =>
+    send(res, 200, admin.createMenuFromTemplate(db, { template: p.tpl, actor: user.email })));
+  route('POST', '/api/staff/menus/:vid/import', 'staff', async ({ req, res, p, user }) => {
+    const b = await readJson(req); send(res, 200, admin.importMenuCsv(db, { versionId: int(p.vid), csv: b.csv, actor: user.email }));
+  });
   route('GET', '/api/staff/menus', 'staff', ({ res }) => send(res, 200, admin.listMenus(db)));
   route('POST', '/api/staff/menus', 'staff', async ({ req, res, user }) => {
     const b = await readJson(req);
@@ -266,6 +283,11 @@ function createApp({ db, adapters = defaultAdapters(), secureCookies = process.e
     admin.removeMapping(db, { clientId: clientExists(int(p.id)), mappingId: int(p.mid), actor: user.email }); send(res, 200, { ok: true });
   });
 
+  route('GET', '/api/staff/clickup/browse', 'staff', async ({ res }) => {
+    const a = adapters.clickup;
+    if (!a || typeof a.listHierarchy !== 'function') throw new AppError(409, a && a.message ? a.message : 'ClickUp is not connected');
+    send(res, 200, await a.listHierarchy());
+  });
   route('GET', '/api/staff/match-queue', 'staff', ({ res }) => send(res, 200, ingest.matchQueue(db)));
   route('POST', '/api/staff/match-queue/:rid', 'staff', async ({ req, res, p, user }) => {
     const b = await readJson(req);
@@ -336,10 +358,25 @@ if (require.main === module) {
   if (process.env.BACKUP_DAILY === '1') {
     require('./backup').scheduleDailyBackups(db, { dbFile: process.env.DB_FILE || require('node:path').join(__dirname, '..', 'data', 'leadg2.db') });
   }
+  // Make sure the LeadG2 service point menu is there from the start.
+  if (!db.prepare('SELECT 1 FROM menu_items LIMIT 1').get()) {
+    const empty = db.prepare('SELECT id FROM menu_versions ORDER BY id DESC LIMIT 1').get();
+    if (empty) {
+      const csv = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'data', 'menus', 'leadg2-service-points-2026.csv'), 'utf8');
+      const r = admin.importMenuCsv(db, { versionId: empty.id, csv, actor: 'first-start' });
+      console.log(`Loaded the LeadG2 2026 menu into your existing menu (${r.added} items).`);
+    } else {
+      const r = admin.createMenuFromTemplate(db, { template: 'leadg2-2026', actor: 'first-start' });
+      console.log(`Loaded the LeadG2 2026 menu (${r.added} items).`);
+    }
+  }
   const hubspot = new HubSpotSync();
   if (hubspot.configured) hubspotSync.scheduleHubSpotSync(db, hubspot);
+  const demo = process.env.DEMO_MODE === '1';
+  const adapters = defaultAdapters({ demo });
+  require('./scheduler').scheduleSourceSync(db, adapters);
   const port = Number(process.env.PORT || 3000);
-  http.createServer(createApp({ db, hubspot, demo: process.env.DEMO_MODE === '1' })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
+  http.createServer(createApp({ db, hubspot, adapters, demo })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
 }
 
 module.exports = { createApp };

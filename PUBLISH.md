@@ -62,13 +62,22 @@ Render deploys from a GitHub repository.
 1. Open the link you copied in Step 2. It works once and expires in 7 days. Choose your password.
    - If the link has expired: in Render, change `ADMIN_EMAIL` to a different address of yours, or ask Claude for another way.
 2. Sign in at **https://points.leadg2.com**, then work through these in order:
-   1. **Admin → Service menu:** create your menu.
+   1. **Admin → Service menu:** your LeadG2 2026 menu (40 items) is already loaded. Adjust any prices there.
    2. **Admin → LeadG2 team:** invite your teammates. Each gets their own setup link.
    3. **Admin → Clients:** add your pilot client. Paste their HubSpot company record URL into the HubSpot field.
    4. **Sources & sync:** add their ClickUp lists and email domain. These stay in sample mode until live connectors are turned on.
    5. **Client access:** check the preview, add client logins, then turn access on.
 
-## Step 5 (optional): Show balances on HubSpot company records
+## Step 5: Connect ClickUp
+
+Until this is done, ClickUp shows **Not connected yet**. The live app never uses sample data.
+
+1. In ClickUp, click your avatar → **Settings** → **Apps** → **API Token** → **Generate**, and copy the token (it starts with `pk_`). Use an account that can see the client spaces. The app only *reads* ClickUp; it never changes tasks.
+2. In Render, open **leadg2-points → Environment → Add Environment Variable**. Set the key to `CLICKUP_API_TOKEN` and the value to the token, then click **Save**. The app restarts in about a minute.
+3. In the app, open a client, go to **Sources & sync**, click **Browse ClickUp**, and pick their lists (or a whole space). Then click **Sync ClickUp now**.
+4. From then on, ClickUp syncs every hour by itself. New suggestions appear in the **Review queue**; nothing changes a balance until someone approves.
+
+## Step 6 (optional): Show balances on HubSpot company records
 
 The app copies **allocated, used, committed and available** points, plus the contract end date, onto each linked client's HubSpot company record. They appear in a property group called **LeadG2 service points**, so you can add them to the company sidebar, reports and workflows (for example, "notify the consultant when available points drop below 20").
 

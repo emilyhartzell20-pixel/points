@@ -313,17 +313,31 @@ function renderEntry() {
 // ------------------------------------------------------------------ sources
 function renderSources() {
   const o = state.overview;
+  const MODE_TEXT = { live: 'Connected · read-only', sample: 'Sample data (demo only)', not_connected: 'Not connected yet' };
+  const HOW_TO = {
+    clickup: [
+      'In ClickUp, click your avatar → Settings → Apps → API Token → Generate, then copy the token (starts with pk_).',
+      'In Render, open leadg2-points → Environment → Add Environment Variable: key CLICKUP_API_TOKEN, value = the token. Save (the app restarts in about a minute).',
+      'Come back here, pick this client\'s ClickUp lists below, and click Sync. After that it syncs by itself every hour.',
+    ],
+    outlook: ['Outlook needs a Microsoft 365 app registration with read-only mail access. Your Microsoft 365 admin can set it up using DEPLOY.md, section 6. Until then, log email-only work with "+ Add points".'],
+  };
+  const typesFor = { clickup: ['clickup_list', 'clickup_space'], outlook: ['email_domain', 'email_address'] };
   const box = (key, label) => {
     const s = o.sync[key];
+    const mode = o.connector_mode[key];
+    const mapped = key === 'tracker' || o.mappings.some((m) => typesFor[key].includes(m.source_type));
     return h('div', { class: 'card' }, h('h3', {}, label),
-      key !== 'tracker' ? h('p', { class: 'small' }, `Mode: ${o.connector_mode[key]} (read-only)`) : null,
-      h('p', {}, 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at))),
-      s.last_run ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}${s.last_run.since ? ` · since ${fmtDate(s.last_run.since)}` : ''}`) : null,
-      s.recent_failures.length ? h('div', { class: 'error small' }, h('strong', {}, 'Recent failures'), h('ul', {}, s.recent_failures.map((f) => h('li', {}, `${fmtDateTime(f.started_at)}: ${f.error}`)))) : null,
-      key !== 'tracker' ? h('button', { class: 'primary', onclick: () => act(async () => {
+      key !== 'tracker' ? h('p', {}, h('span', { class: `status ${mode === 'live' ? 'active' : mode === 'sample' ? 'invited' : 'invite_expired'}` }, MODE_TEXT[mode] || mode)) : null,
+      key !== 'tracker' && mode === 'not_connected' ? h('ol', { class: 'small steps' }, HOW_TO[key].map((t) => h('li', {}, t))) : null,
+      key !== 'tracker' && mode === 'live' && !mapped ? h('p', { class: 'small' }, `No ${label} sources for this client yet. Add them below.`) : null,
+      h('p', { class: 'small' }, 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · syncs automatically every hour' : ''),
+      s.last_run ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}`) : null,
+      s.recent_failures.length && mode !== 'not_connected' ? h('div', { class: 'error small' }, h('strong', {}, 'Recent failures'), h('ul', {}, s.recent_failures.slice(0, 3).map((f) => h('li', {}, `${fmtDateTime(f.started_at)}: ${f.error}`)))) : null,
+      key !== 'tracker' && mode !== 'not_connected' ? h('button', { class: 'primary', disabled: !mapped, onclick: () => act(async () => {
         const r = await api(`/api/staff/clients/${state.clientId}/sync`, { source: key });
         if (r[key].status === 'failed') throw new Error(`Sync failed: ${r[key].error}`);
-        toast(`Synced: ${r[key].new} new, ${r[key].updated} updated`);
+        toast(`Synced: ${r[key].new} new, ${r[key].updated} updated. Check the Review queue.`);
       }) }, `Sync ${label} now`) : null);
   };
   return h('div', {},
@@ -358,7 +372,28 @@ function renderMappings(o) {
   type.addEventListener('change', () => {
     value.placeholder = { clickup_space: 'Paste the ClickUp space URL or ID', clickup_list: 'Paste the ClickUp list URL or ID', email_domain: 'clientname.com', email_address: 'person@clientname.com' }[type.value];
   });
+  // Pick ClickUp lists from the connected workspace instead of pasting IDs.
+  const picker = h('div', { class: 'actions' });
+  if (o.connector_mode.clickup === 'live') {
+    picker.append(h('button', { type: 'button', class: 'secondary', onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Loading ClickUp…';
+      try {
+        const tree = await api('/api/staff/clickup/browse');
+        const sel = h('select', { 'aria-label': 'ClickUp list or space' }, h('option', { value: '' }, '— choose a ClickUp list or space —'),
+          tree.map((t) => h('optgroup', { label: `${t.workspace} · ${t.space.name}` },
+            h('option', { value: `clickup_space:${t.space.id}`, 'data-label': `${t.space.name} (whole space)` }, `Whole space: ${t.space.name}`),
+            t.lists.map((l) => h('option', { value: `clickup_list:${l.id}`, 'data-label': `${t.space.name} › ${l.folder ? `${l.folder} › ` : ''}${l.name}` }, `${l.folder ? `${l.folder} › ` : ''}${l.name}`)))));
+        sel.addEventListener('change', () => {
+          if (!sel.value) return;
+          const [t, id] = sel.value.split(':'); type.value = t; value.value = id;
+          label.value = sel.selectedOptions[0].dataset.label;
+        });
+        picker.replaceChildren(h('label', {}, 'Pick from ClickUp', sel));
+      } catch (ex) { toast(ex.message, 'error'); e.target.disabled = false; e.target.textContent = 'Browse ClickUp'; }
+    } }, 'Browse ClickUp'));
+  }
   const form = h('form', {},
+    picker,
     h('div', { class: 'row' }, h('label', {}, 'Source', type), h('label', {}, 'Which one', value)),
     h('div', { class: 'row' }, h('label', {}, 'What kind of work is in it', scope), h('label', {}, 'Label (optional)', label)),
     h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Add source')));
@@ -366,7 +401,6 @@ function renderMappings(o) {
     e.preventDefault();
     act(() => api(`/api/staff/clients/${state.clientId}/mappings`, { sourceType: type.value, value: value.value, scope: scope.value, label: label.value }), 'Source added');
   });
-  const live = Object.values(o.connector_mode).every((m) => m === 'live');
   return h('div', {},
     h('section', { class: 'card' }, h('h2', {}, `Where ${o.client.name}'s work comes from`),
       h('p', { class: 'muted small' }, 'The app only reads the ClickUp lists/spaces and email addresses listed here. Anything else is ignored, and emails that merely mention the client by name go to "Uncertain client matches" for a person to decide.'),
@@ -380,9 +414,11 @@ function renderMappings(o) {
           } }, 'Remove'))))))),
       h('h3', {}, 'Add a source'), form),
     h('section', { class: 'card explain' }, h('h2', {}, 'How the ClickUp connection works'),
-      h('p', { class: 'small' }, live ? 'Connected to live ClickUp and Outlook.' : 'Right now the app is reading built-in SAMPLE data, not your real ClickUp or Outlook. Switching to live is a server setting (see README).'),
+      h('p', { class: 'small' }, o.connector_mode.clickup === 'live' ? 'ClickUp is connected. It syncs every hour, or click "Sync ClickUp now".'
+        : o.connector_mode.clickup === 'sample' ? 'This is the demo: it reads built-in sample data, not your real ClickUp.'
+        : 'ClickUp is not connected yet. Follow the three steps in the ClickUp box above.'),
       h('ol', { class: 'small' },
-        h('li', {}, 'When you click "Sync ClickUp now", the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads; it can never change a task.'),
+        h('li', {}, 'Every hour (or when you click "Sync ClickUp now"), the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads; it can never change a task.'),
         h('li', {}, 'For each task it notes the status (to do, in progress, complete, canceled), plus these optional task fields: a "Service Menu Item" custom field or a tag like menu:LP-BUILD, a "Points" custom field, and an "Hours" field for support work. Subtasks roll up into their parent task.'),
         h('li', {}, 'Emails that contain the task link (app.clickup.com/t/…) or its ID (CU-…) are grouped with that task, so one deliverable becomes one suggestion.'),
         h('li', {}, 'It turns what it found into suggestions in the Review queue. Nothing changes the balance until a consultant approves.'))));
@@ -646,7 +682,15 @@ async function renderMenu() {
           act(() => api(`/api/staff/menus/${v.id}/items/${i.id}/delete`, {}), 'Item removed');
         } }, 'Remove') : null));
   };
-  const items = h('section', { class: 'card' }, h('h2', {}, 'Menu items'),
+  const csvInput = h('input', { type: 'file', accept: '.csv,text/csv', 'aria-label': 'Menu CSV file' });
+  const importBox = h('details', { class: 'small' }, h('summary', {}, 'Import or update items from a CSV file'),
+    h('p', { class: 'muted small' }, 'Columns: code, name, points_min, points_max, category, keywords, notes. Rows are matched by code, so re-importing an updated file changes prices without duplicating items.'),
+    h('div', { class: 'actions' }, csvInput, h('button', { onclick: () => act(async () => {
+      const file = csvInput.files[0]; if (!file) throw new Error('Choose a CSV file');
+      const r = await api(`/api/staff/menus/${v.id}/import`, { csv: await file.text() });
+      toast(`Imported: ${r.added} added, ${r.updated} updated`);
+    }) }, 'Import')));
+  const items = h('section', { class: 'card' }, h('h2', {}, 'Menu items'), importBox,
     h('p', { class: 'muted small' }, 'For a fixed price, fill in only "Points". For a range (reviewer confirms the amount), also fill in "Up to". Keywords help the app recognize the item in ClickUp tasks and emails.'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'menu-table' },
       h('thead', {}, h('tr', {}, ['Item', 'Code', 'Points', 'Up to', 'Keywords', 'Notes', ''].map((t) => h('th', {}, t)))),
@@ -664,17 +708,27 @@ async function renderMenu() {
       state.menuId = created.id;
     }, 'New menu version created') }, 'Create version')));
 
-  return h('div', {}, h('div', { class: 'card' }, h('label', {}, 'Menu version', picker)), details, items, newVersion);
+  const tplBtn = h('button', { onclick: () => {
+    if (!confirm('Add the LeadG2 Service Points 2026 menu (40 items) as a new menu version? Your existing menus are not changed.')) return;
+    act(async () => { const r = await api('/api/staff/menu-templates/leadg2-2026', {}); state.menuId = r.id; toast(`Menu ${r.code} loaded: ${r.added} items`); });
+  } }, 'Load LeadG2 2026 menu as a new version');
+  return h('div', {}, h('div', { class: 'card' }, h('div', { class: 'row' }, h('label', {}, 'Menu version', picker), h('div', { class: 'actions' }, tplBtn))), details, items, newVersion);
 }
 
 function renderFirstMenu() {
-  const code = h('input', { placeholder: 'e.g. 2026.1', required: true }); const date = h('input', { type: 'date', required: true });
-  return h('section', { class: 'card' }, h('h2', {}, 'Create your service menu'),
-    h('p', { class: 'muted small' }, 'Every client contract uses a menu version. Create one, then add its items.'),
-    h('div', { class: 'row' }, h('label', {}, 'Version label', code), h('label', {}, 'Takes effect', date)),
-    h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(async () => {
-      state.menuId = (await api('/api/staff/menus', { code: code.value, effectiveDate: date.value })).id;
-    }, 'Menu created') }, 'Create menu')));
+  const code = h('input', { placeholder: 'e.g. 2027.1', required: true }); const date = h('input', { type: 'date', required: true });
+  return h('div', {},
+    h('section', { class: 'card' }, h('h2', {}, 'Start with the LeadG2 2026 menu'),
+      h('p', { class: 'muted small' }, 'Loads the 40 items from the "LeadG2 Service Points 2026" one-pager (Consulting & Support, Content/Promotion, Sales) with their point values. You can edit any item afterwards.'),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(async () => {
+        const r = await api('/api/staff/menu-templates/leadg2-2026', {});
+        state.menuId = r.id; toast(`Menu ${r.code} loaded: ${r.added} items`);
+      }) }, 'Load the LeadG2 2026 menu'))),
+    h('section', { class: 'card' }, h('h2', {}, 'Or start an empty menu'),
+      h('div', { class: 'row' }, h('label', {}, 'Version label', code), h('label', {}, 'Takes effect', date)),
+      h('div', { class: 'actions' }, h('button', { onclick: () => act(async () => {
+        state.menuId = (await api('/api/staff/menus', { code: code.value, effectiveDate: date.value })).id;
+      }, 'Menu created') }, 'Create empty menu'))));
 }
 
 async function renderAudit() {
