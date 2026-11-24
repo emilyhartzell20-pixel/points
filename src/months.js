@@ -1,4 +1,14 @@
 'use strict';
+// Where an in-motion item is, in client-friendly words (from the tracker's Service Point Status).
+function phaseLabel(raw, stage) {
+  if (!raw || stage !== 'committed') return null;
+  const s = String(raw).toLowerCase();
+  if (/review|approval/.test(s)) return 'Ready for your review';
+  if (/block|hold|waiting/.test(s)) return 'On hold';
+  if (/ongoing|recurring/.test(s)) return 'Ongoing';
+  if (/progress|working|draft|design|revision/.test(s)) return 'In progress';
+  return String(raw).trim().replace(/^\w/, (c) => c.toUpperCase()).slice(0, 30);
+}
 // Work grouped by month with a type (category) per item, for the "By month" views.
 // The client version uses only client-approved descriptions; totals always include every item.
 const ledger = require('./ledger');
@@ -21,7 +31,7 @@ function byMonth(db, clientId, opts = {}) {
   const { forClient = false, includePlanned = true } = opts;
   const b = ledger.balance(db, clientId);
   const states = includePlanned ? ['used', 'committed', 'forecast'] : ['used', 'committed'];
-  const rows = db.prepare(`SELECT w.id, w.title, w.client_summary, w.summary_approved, w.state, w.points, w.work_date, w.category, w.menu_item_code,
+  const rows = db.prepare(`SELECT w.id, w.title, w.client_summary, w.summary_approved, w.phase, w.state, w.points, w.work_date, w.category, w.menu_item_code,
       (SELECT category FROM menu_items mi WHERE mi.menu_version_id = w.menu_version_id AND mi.code = w.menu_item_code) AS menu_category
     FROM work_items w WHERE w.client_id = ? AND w.state IN (${states.map(() => '?').join(',')}) ORDER BY w.work_date, w.id`).all(clientId, ...states);
 
@@ -42,8 +52,8 @@ function byMonth(db, clientId, opts = {}) {
     m[stage] += r.points;
     if (forClient && !(r.summary_approved && r.client_summary)) { m.other_points += r.points; continue; }
     m.items.push(forClient
-      ? { description: r.client_summary, stage, points: r.points, type: r.type, date: r.work_date }
-      : { id: r.id, title: r.title, client_summary: r.client_summary, summary_approved: !!r.summary_approved, stage, points: r.points, type: r.type, date: r.work_date, menu_item_code: r.menu_item_code });
+      ? { description: r.client_summary, stage, phase: phaseLabel(r.phase, stage), points: r.points, type: r.type, date: r.work_date }
+      : { id: r.id, title: r.title, client_summary: r.client_summary, summary_approved: !!r.summary_approved, stage, phase: phaseLabel(r.phase, stage), points: r.points, type: r.type, date: r.work_date, menu_item_code: r.menu_item_code });
   }
   // Looking ahead: this month through the end of the contract (or the last scheduled work, if later).
   // Available already excludes approved (committed) work, so only planned points reduce the projection.

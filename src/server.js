@@ -119,10 +119,34 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
   route('GET', '/healthz', null, ({ res }) => { db.prepare('SELECT 1').get(); send(res, 200, { ok: true, version: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null }); });
   route('GET', '/api/me', 'any', ({ res, user }) => send(res, 200, { user }));
 
+  // ---- keeping pages current with ClickUp
+  // Opening a dashboard re-reads that client's ClickUp trackers (and calendar/approvals) if the last read is
+  // more than 2 minutes old, waiting up to 5 seconds for it; the 10-minute background sync covers the rest.
+  const lastRead = new Map(); const reading = new Map();
+  const freshen = async (clientId, waitMs = 5000) => {
+    const a = adapters.clickup;
+    if (!a || a.mode !== 'live' || Date.now() - (lastRead.get(clientId) || 0) < 2 * 60e3) return;
+    let job = reading.get(clientId);
+    if (!job) {
+      const hasTracker = db.prepare(`SELECT 1 FROM hours_trackers WHERE client_id = ? UNION SELECT 1 FROM source_mappings
+        WHERE client_id = ? AND scope = 'points' AND source_type IN ('clickup_list','clickup_space')`).get(clientId, clientId);
+      job = Promise.all([
+        hasTracker ? ingest.importTrackerFromClickUp(db, { clientId, adapter: a, allowEmpty: true }) : null,
+        feeds.refreshFeeds(db, a, { clientId }),
+      ]).catch((e) => console.error(`Refresh from ClickUp failed for client ${clientId}: ${e.message}`))
+        .finally(() => { reading.delete(clientId); lastRead.set(clientId, Date.now()); });
+      reading.set(clientId, job);
+    }
+    let timer;
+    await Promise.race([job, new Promise((r) => { timer = setTimeout(r, waitMs); })]);
+    clearTimeout(timer);
+  };
+
   // ---- client (scope comes from the session ONLY)
-  route('GET', '/api/client/dashboard', 'client', ({ res, user }) => {
+  route('GET', '/api/client/dashboard', 'client', async ({ res, user }) => {
     const c = db.prepare('SELECT portal_enabled FROM clients WHERE id = ?').get(user.client_id);
     if (!c || !c.portal_enabled) throw new AppError(403, 'Dashboard access has not been granted');
+    await freshen(user.client_id);
     send(res, 200, clientDashboard(db, user.client_id));
   });
 
@@ -147,8 +171,9 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     const rows = db.prepare('SELECT id, slug, name, portal_enabled, pilot FROM clients ORDER BY pilot DESC, name').all();
     send(res, 200, rows.map((c) => ({ ...c, open_suggestions: db.prepare(`SELECT COUNT(*) n FROM suggestions WHERE client_id=? AND status='open'`).get(c.id).n })));
   });
-  route('GET', '/api/staff/clients/:id/overview', 'staff', ({ res, p }) => {
+  route('GET', '/api/staff/clients/:id/overview', 'staff', async ({ res, p }) => {
     const id = clientExists(int(p.id));
+    await freshen(id);
     const contract = ledger.activeContract(db, id);
     const menu = menuForClient(db, id);
     send(res, 200, {
@@ -200,7 +225,17 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
     const results = {};
     for (const s of sources) {
       if (!adapters[s]) throw new AppError(400, `Unknown source ${s}`);
-      results[s] = await ingest.syncSource(db, { clientId: id, source: s, adapter: adapters[s], actor: user.email });
+      const tracked = s === 'clickup' && adapters.clickup.mode === 'live' && db.prepare(`SELECT 1 FROM hours_trackers WHERE client_id = ? UNION
+        SELECT 1 FROM source_mappings WHERE client_id = ? AND scope = 'points' AND source_type IN ('clickup_list','clickup_space')`).get(id, id);
+      if (tracked) {
+        // ClickUp trackers are mirrored: the app is made to match ClickUp exactly.
+        try {
+          const r = await ingest.importTrackerFromClickUp(db, { clientId: id, adapter: adapters.clickup, actor: user.email, allowEmpty: true });
+          await feeds.refreshFeeds(db, adapters.clickup, { clientId: id });
+          lastRead.set(id, Date.now());
+          results[s] = { status: 'success', mirrored: true, new: r.created, updated: r.updated, removed: r.removed, found: r.found };
+        } catch (e) { results[s] = { status: 'failed', error: e.message }; }
+      } else results[s] = await ingest.syncSource(db, { clientId: id, source: s, adapter: adapters[s], actor: user.email });
     }
     send(res, 200, results);
   });

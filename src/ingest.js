@@ -497,46 +497,134 @@ function resolveMatch(db, { recordId, clientId, actor, reason }) {
 const TRACKER_STATE = { completed: 'used', approved: 'committed', in_progress: 'committed' };
 
 /**
+ * Stage from the tracker's Service Point Status. Planned (or blank) is planned; once an item moves past
+ * Planned (Ongoing, In Progress, Client Review, Blocked, …) its points count as committed; Completed = used.
+ */
+function trackerStage(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (!s || /^(planned|planning|to do|not started|backlog)$/.test(s)) return 'forecast';
+  if (/cancel/.test(s)) return 'canceled';
+  if (/^(complete|completed|done|delivered|closed)$/.test(s)) return 'used';
+  return 'committed';
+}
+
+/**
  * Read every task in the client's ClickUp tracker list(s) and put each one with points on the ledger:
  * Completed = used, In Progress / Client Review = committed, everything else = planned (forecast).
  * Idempotent: tasks already imported (here or from the tracker CSV) are skipped.
  */
-async function importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmpty = false }) {
-  const importer = require('./importer');
+/**
+ * Make the app match the client's ClickUp tracker(s) exactly: ClickUp is the source of truth.
+ * New tracker items are added, changed ones (status, points, month, type, name) are updated, and items
+ * removed from the tracker are canceled. Every change is logged with "clickup-sync" as the actor.
+ * Points trackers: Service Point Status gives the stage (Completed = used, In Progress / Client Review =
+ * committed, anything else = planned) and Total Points the amount. Hours trackers: see readHoursTracker.
+ */
+async function importTrackerFromClickUp(db, { clientId, adapter, actor = 'clickup-sync', allowEmpty = false }) {
+  const ledger = require('./ledger');
   if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
-  const hoursLists = db.prepare('SELECT list_id FROM hours_trackers WHERE client_id = ?').all(clientId);
-  if (hoursLists.length) {
-    const sum = { created: 0, skipped: 0, conflicts: [], found: 0 };
-    for (const h of hoursLists) {
-      const r = await importHoursTracker(db, { clientId, listId: h.list_id, adapter, actor });
-      sum.created += r.created; sum.skipped += r.skipped; sum.found += r.found; sum.conflicts.push(...(r.conflicts || []));
-      if (r.not_counted) sum.not_counted = r.not_counted;
+  const contract = activeContract(db, clientId);
+  const unit = db.prepare('SELECT unit FROM clients WHERE id = ?').get(clientId).unit;
+  const amount = (n) => (unit === 'hours' ? quarter(n) : Math.round(n));
+  const desired = []; let notCounted = null; let fetched = 0;
+
+  // Hours trackers (calls & training logs).
+  for (const h of db.prepare('SELECT list_id FROM hours_trackers WHERE client_id = ?').all(clientId)) {
+    const tasks = await adapter.fetchTasks({ mappings: [{ source_type: 'clickup_list', value: h.list_id }], since: null });
+    fetched += tasks.length;
+    const { contracts, entries, contracted } = readHoursTracker(tasks, { year: contract.term_start.slice(0, 4) });
+    if (contracted > 0 && ledger.balance(db, clientId).allocated === 0) {
+      ledger.addAllocation(db, { clientId, kind: 'base', points: quarter(contracted), actor,
+        sourceRef: `ClickUp "CONTRACT ALLOCATION" rows: ${contracts.map((c) => `${c.pool} ${c.hours}`).join(', ')} (confirm against the signed agreement)` });
     }
-    return sum;
+    const today = new Date().toISOString().slice(0, 10);
+    for (const e of entries.filter((x) => x.date && x.counted)) {
+      desired.push({ taskId: e.id, title: e.title, points: amount(e.hours), state: e.date > today ? 'forecast' : 'used', date: e.date, category: e.pool, phase: null,
+        notes: 'From the ClickUp hours tracker' });
+    }
+    const outside = entries.filter((x) => !x.counted);
+    if (outside.length) notCounted = { calls: outside.length, hours: quarter(outside.reduce((a, x) => a + x.hours, 0)), pools: [...new Set(outside.map((x) => x.pool))] };
+    db.prepare('UPDATE hours_trackers SET imported_at = ?, last_error = NULL WHERE list_id = ?').run(nowIso(), h.list_id);
   }
+
+  // Points trackers.
   const mappings = mappingsFor(db, clientId).filter((m) => m.source_type.startsWith('clickup') && m.scope === 'points');
-  if (!mappings.length) throw Object.assign(new Error('Add the client\'s ClickUp tracker list under "Where the work comes from" first'), { status: 409 });
-  const all = await fetchClickUp(adapter, { mappings, aliases: [], since: null });
-  const titles = Object.fromEntries(all.map((t) => [t.external_id, t.title]));
-  const tasks = all.filter((t) => t.data.from_tracker && t.data.points != null);
-  if (!tasks.length) {
-    if (!allowEmpty) throw Object.assign(new Error('No tasks with "Total Points" were found in the mapped ClickUp lists'), { status: 409 });
-    const sync = await syncSource(db, { clientId, source: 'clickup', adapter, actor, full: true });
-    return { created: 0, skipped: 0, conflicts: [], found: 0, sync };
+  if (mappings.length) {
+    const all = await fetchClickUp(adapter, { mappings, aliases: [], since: null });
+    fetched += all.length;
+    const titles = Object.fromEntries(all.map((t) => [t.external_id, t.title]));
+    for (const t of all.filter((x) => x.data.from_tracker && x.data.points != null)) {
+      const date = (trackerMonth(t.data, titles[t.data.raw_parent], contract.term_start) || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
+      desired.push({ taskId: t.external_id, title: t.title.trim(), points: amount(t.data.points), date, category: t.data.department || null,
+        // A blank Service Point Status is planned (the task's own ClickUp status is about the work, not the points).
+        state: trackerStage(t.data.tracker_status), phase: t.data.tracker_status ? t.data.tracker_status.trim() : null,
+        notes: [t.data.point_value != null && t.data.how_many != null ? `${t.data.point_value} x ${t.data.how_many}` : '', t.data.tracker_notes].filter(Boolean).join('; ') || null });
+    }
   }
-  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = tasks.map((t) => {
-    const sig = clickupSignal(t.status);
-    const state = TRACKER_STATE[sig] || 'forecast';
-    const date = (trackerMonth(t.data, titles[t.data.raw_parent], activeContract(db, clientId).term_start) || t.data.date_closed || t.data.date_created || nowIso()).slice(0, 10);
-    const notes = [t.data.department, t.data.point_value != null && t.data.how_many != null ? `${t.data.point_value} pts x ${t.data.how_many}` : '', t.data.tracker_notes].filter(Boolean).join('; ');
-    return [q(`CU-${t.external_id}`), date, q(t.title.trim()), q(t.title.trim()), '', Math.round(t.data.points), state, q(t.external_id), q(notes), q(t.data.department || '')].join(',');
+  if (!desired.length && !fetched) {
+    if (!allowEmpty && !mappings.length && !db.prepare('SELECT 1 FROM hours_trackers WHERE client_id = ?').get(clientId)) {
+      throw Object.assign(new Error('Link the client\'s ClickUp tracker first (Admin → Clients → Scan ClickUp)'), { status: 409 });
+    }
+    db.prepare(`INSERT INTO sync_runs (client_id, source, mode, status, started_at, finished_at) VALUES (?,?,?,?,?,?)`)
+      .run(clientId, 'clickup', adapter.mode, 'success', nowIso(), nowIso());
+    return { created: 0, updated: 0, removed: 0, skipped: 0, found: 0, conflicts: [] };
+  }
+
+  const stats = { created: 0, updated: 0, removed: 0, skipped: 0, found: desired.length, conflicts: [], not_counted: notCounted };
+  const reason = 'Matched to the ClickUp tracker';
+  tx(db, () => {
+    const seen = new Set();
+    for (const d of desired) {
+      const ref = `tracker:CU-${d.taskId}`; const gk = `clickup:${String(d.taskId).toLowerCase()}`;
+      seen.add(ref);
+      let w = db.prepare('SELECT * FROM work_items WHERE client_id = ? AND external_ref = ?').get(clientId, ref)
+        || db.prepare('SELECT * FROM work_items WHERE client_id = ? AND group_key = ?').get(clientId, gk);
+      if (!w) {
+        if (d.state === 'canceled') continue;
+        ledger.createWorkItem(db, { clientId, state: d.state, points: d.points, title: d.title, clientSummary: d.title, summaryApproved: true,
+          externalRef: ref, groupKey: gk, workDate: d.date, origin: 'import', internalNotes: d.notes, actor, category: d.category,
+          reason, overrideReason: 'ClickUp tracker is the source of truth' });
+        if (d.phase) db.prepare('UPDATE work_items SET phase = ? WHERE client_id = ? AND external_ref = ?').run(d.phase, clientId, ref);
+        stats.created++; continue;
+      }
+      if (w.external_ref !== ref && !db.prepare('SELECT 1 FROM work_items WHERE client_id = ? AND external_ref = ?').get(clientId, ref)) {
+        db.prepare('UPDATE work_items SET external_ref = ? WHERE id = ?').run(ref, w.id);
+      }
+      const r = ledger.mirrorItem(db, { itemId: w.id, state: d.state, points: d.points, actor, reason });
+      w = r.item;
+      const detail = w.title !== d.title || w.work_date !== d.date || (d.category && w.category !== d.category) || (w.phase || null) !== (d.phase || null);
+      if (detail) {
+        db.prepare(`UPDATE work_items SET title = ?, client_summary = CASE WHEN client_summary IS NULL OR client_summary = title THEN ? ELSE client_summary END,
+          work_date = ?, category = COALESCE(?, category), phase = ?, updated_at = ? WHERE id = ?`).run(d.title, d.title, d.date, d.category, d.phase || null, nowIso(), w.id);
+      }
+      if (r.changed || detail) stats.updated++; else stats.skipped++;
+    }
+    // Removed from the tracker in ClickUp → canceled here (never deleted, so the history stays).
+    for (const w of db.prepare(`SELECT * FROM work_items WHERE client_id = ? AND external_ref LIKE 'tracker:CU-%' AND state != 'canceled'`).all(clientId)) {
+      if (seen.has(w.external_ref)) continue;
+      ledger.mirrorItem(db, { itemId: w.id, state: 'canceled', points: w.points, actor, reason: 'No longer in the ClickUp tracker' });
+      stats.removed++;
+    }
+    audit(db, { clientId, actor, action: 'clickup.mirror', detail: { created: stats.created, updated: stats.updated, removed: stats.removed } });
   });
-  const csv = ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes,category', ...rows].join('\n');
-  const result = importer.importTracker(db, { clientId, csv, actor, filename: 'ClickUp tracker' });
-  // Then a full sync, so each item links to its ClickUp task and later changes are picked up from here.
-  const sync = await syncSource(db, { clientId, source: 'clickup', adapter, actor, full: true });
-  return { ...result, found: tasks.length, sync };
+  db.prepare(`INSERT INTO sync_runs (client_id, source, mode, status, started_at, finished_at, records_seen, records_new, records_updated)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(clientId, 'clickup', adapter.mode, 'success', nowIso(), nowIso(), stats.found, stats.created, stats.updated + stats.removed);
+  return stats;
+}
+
+/** Mirror every client that has a ClickUp tracker. */
+async function mirrorAll(db, adapter, log = console) {
+  if (!adapter || adapter.mode !== 'live') return;
+  const ids = db.prepare(`SELECT client_id FROM hours_trackers UNION SELECT client_id FROM source_mappings
+    WHERE source_type IN ('clickup_list','clickup_space') AND scope = 'points'`).all().map((r) => r.client_id);
+  for (const clientId of ids) {
+    try { await importTrackerFromClickUp(db, { clientId, adapter, allowEmpty: true }); }
+    catch (e) {
+      log.error(`ClickUp mirror failed for client ${clientId}: ${e.message}`);
+      try { db.prepare(`INSERT INTO sync_runs (client_id, source, mode, status, started_at, finished_at, error) VALUES (?,?,?,?,?,?,?)`)
+        .run(clientId, 'clickup', adapter.mode, 'failed', nowIso(), nowIso(), String(e.message).slice(0, 300)); } catch { /* ignore */ }
+    }
+  }
 }
 
 // ---------------------------------------------------------------- hours trackers (calls & training logs)
@@ -580,46 +668,11 @@ function readHoursTracker(tasks, { year }) {
   return { contracts, entries, contracted: contracts.reduce((a, c) => a + c.hours, 0) };
 }
 
-/** Load (or top up) one hours tracker into a client's ledger. Safe to run again: known calls are skipped. */
-async function importHoursTracker(db, { clientId, listId, adapter, actor }) {
-  const importer = require('./importer');
-  const ledger = require('./ledger');
-  if (!adapter || adapter.mode !== 'live') throw Object.assign(new Error('ClickUp is not connected'), { status: 409 });
-  const contract = activeContract(db, clientId);
-  try {
-    const tasks = await adapter.fetchTasks({ mappings: [{ source_type: 'clickup_list', value: String(listId) }], since: null });
-    const { contracts, entries, contracted } = readHoursTracker(tasks, { year: contract.term_start.slice(0, 4) });
-    // The contracted hours become the allocation the first time (only when none is recorded yet).
-    if (contracted > 0 && ledger.balance(db, clientId).allocated === 0) {
-      ledger.addAllocation(db, { clientId, kind: 'base', points: quarter(contracted), actor,
-        sourceRef: `ClickUp "CONTRACT ALLOCATION" rows: ${contracts.map((c) => `${c.pool} ${c.hours}`).join(', ')} (confirm against the signed agreement)` });
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const outside = entries.filter((e) => !e.counted);
-    const rows = entries.filter((e) => e.date && e.counted).map((e) => [q(`CU-${e.id}`), e.date, q(e.title), q(e.title), '', e.hours,
-      e.date > today ? 'forecast' : 'used', q(e.id), q('From the ClickUp hours tracker'), q(e.pool)].join(','));
-    const result = rows.length
-      ? importer.importTracker(db, { clientId, actor, filename: 'ClickUp hours tracker',
-        csv: ['tracker_id,date,title,client_summary,menu_code,points,status,clickup_task_id,notes,category', ...rows].join('\n') })
-      : { created: 0, skipped: 0, conflicts: [] };
-    db.prepare('UPDATE hours_trackers SET imported_at = ?, last_error = NULL WHERE list_id = ?').run(nowIso(), String(listId));
-    return { ...result, found: entries.length, contracted, undated: entries.filter((e) => !e.date).length,
-      not_counted: outside.length ? { calls: outside.length, hours: quarter(outside.reduce((a, e) => a + e.hours, 0)),
-        pools: [...new Set(outside.map((e) => e.pool))] } : null };
-  } catch (e) {
-    db.prepare('UPDATE hours_trackers SET last_error = ? WHERE list_id = ?').run(String(e.message).slice(0, 300), String(listId));
-    throw e;
-  }
+/** Kept for callers: hours trackers are loaded by the same mirror as points trackers. */
+async function importHoursTracker(db, { clientId, adapter, actor }) {
+  return importTrackerFromClickUp(db, { clientId, adapter, actor, allowEmpty: true });
 }
-
-async function refreshHoursTrackers(db, adapter, log = console) {
-  if (!adapter || adapter.mode !== 'live') return;
-  for (const h of db.prepare('SELECT * FROM hours_trackers').all()) {
-    try { await importHoursTracker(db, { clientId: h.client_id, listId: h.list_id, adapter, actor: 'scheduled-sync' }); }
-    catch (e) { log.error(`Hours tracker ${h.list_id} failed: ${e.message}`); }
-  }
-}
+const refreshHoursTrackers = mirrorAll;
 
 // ---------------------------------------------------------------- find every client's tracker in ClickUp
 const TRACKER_NAME = /(point\s*track|service\s*point)/i;
@@ -749,4 +802,4 @@ async function importTrackers(db, { items, adapter, actor }) {
   return results;
 }
 
-module.exports = { readHoursTracker, importHoursTracker, refreshHoursTrackers, HOURS_TRACKER_NAME, findTrackers, importTrackers, parseAllocation, detectTerm, importTrackerFromClickUp, syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };
+module.exports = { trackerStage, mirrorAll, readHoursTracker, importHoursTracker, refreshHoursTrackers, HOURS_TRACKER_NAME, findTrackers, importTrackers, parseAllocation, detectTerm, importTrackerFromClickUp, syncSource, syncStatus, generateSuggestions, regroup, matchQueue, resolveMatch, matchRecord, emailSignals, findTaskRef, INJECTION };

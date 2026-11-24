@@ -151,6 +151,26 @@ function correct(db, { itemId, points, actor, reason, overrideReason }) {
   });
 }
 
+/**
+ * Make a work item match its source exactly (state and amount), whatever it was before. Used when the
+ * ClickUp tracker is the source of truth: the difference is posted as one logged correction event, so the
+ * ledger stays append-only and every change is traceable. No capacity check: ClickUp decides.
+ */
+function mirrorItem(db, { itemId, state, points, actor, reason }) {
+  return tx(db, () => {
+    const item = getItem(db, itemId);
+    if (item.state === state && item.points === points) return { item, changed: false };
+    const cur = db.prepare('SELECT COALESCE(SUM(committed_delta),0) c, COALESCE(SUM(used_delta),0) u FROM ledger_events WHERE work_item_id = ?').get(itemId);
+    const want = { c: state === 'committed' ? points : 0, u: state === 'used' ? points : 0 };
+    const dc = want.c - Number(cur.c); const du = want.u - Number(cur.u);
+    if (dc || du) addEvent(db, item, 'correction', dc, du, actor, reason);
+    db.prepare('UPDATE work_items SET state = ?, points = ?, updated_at = ? WHERE id = ?').run(state, points, nowIso(), itemId);
+    audit(db, { clientId: item.client_id, actor, action: 'work_item.mirror', entity: 'work_item', entityId: itemId, reason,
+      detail: { from: { state: item.state, points: item.points }, to: { state, points } } });
+    return { item: getItem(db, itemId), changed: true };
+  });
+}
+
 function setSummary(db, { itemId, clientSummary, approved, actor }) {
   return tx(db, () => {
     const item = getItem(db, itemId);
@@ -209,5 +229,5 @@ function addAllocation(db, { clientId, kind, points, sourceRef, actor, note }) {
   });
 }
 
-module.exports = { addAllocation, activeContract, balance, createWorkItem, transition, correct, setSummary, listItems, listEvents,
+module.exports = { mirrorItem, addAllocation, activeContract, balance, createWorkItem, transition, correct, setSummary, listItems, listEvents,
   supportHours, logSupportHours, getItem };

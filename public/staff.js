@@ -1,5 +1,5 @@
 'use strict';
-const state = { clientId: null, tab: 'review', overview: null, clients: [], menuId: null, area: 'workspace' };
+const state = { clientId: null, tab: 'months', overview: null, clients: [], menuId: null, area: 'workspace' };
 const panel = document.getElementById('panel');
 
 const FLAG_TEXT = {
@@ -123,7 +123,7 @@ function setArea(area, tab) {
   document.getElementById('ws-area').hidden = area !== 'workspace';
   document.getElementById('client-pick').hidden = area !== 'workspace';
   document.getElementById('admin-area').hidden = area !== 'admin';
-  state.tab = tab || (area === 'admin' ? 'clients' : 'review');
+  state.tab = tab || (area === 'admin' ? 'clients' : 'months');
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === state.tab));
   refresh();
 }
@@ -233,7 +233,7 @@ function suggestionCard(s, others) {
 
 async function renderReview() {
   const [sugs, queue] = await Promise.all([api(`/api/staff/clients/${state.clientId}/suggestions?status=open`), api('/api/staff/match-queue')]);
-  document.getElementById('qcount').textContent = sugs.length ? String(sugs.length) : '';
+  const qc = document.getElementById('qcount'); if (qc) qc.textContent = sugs.length ? String(sugs.length) : '';
   const out = h('div', {});
   if (queue.length) {
     out.append(h('section', { class: 'card warn' }, h('h2', {}, `Uncertain client matches (${queue.length})`),
@@ -347,7 +347,7 @@ function renderSources() {
     clickup: [
       'In ClickUp, click your avatar → Settings → Apps → API Token → Generate, then copy the token (starts with pk_).',
       'In Render, open leadg2-points → Environment → Add Environment Variable: key CLICKUP_API_TOKEN, value = the token. Save (the app restarts in about a minute).',
-      'Come back here, pick this client\'s ClickUp lists below, and click Sync. After that it syncs by itself every hour.',
+      'Come back here and use Admin → Clients → Scan ClickUp to link each client\'s tracker. After that the app keeps itself in step with ClickUp.',
     ],
     outlook: ['Outlook needs a Microsoft 365 app registration with read-only mail access. Your Microsoft 365 admin can set it up using DEPLOY.md, section 6. Until then, log email-only work with "+ Add points".'],
   };
@@ -360,27 +360,28 @@ function renderSources() {
       key !== 'tracker' ? h('p', {}, h('span', { class: `status ${mode === 'live' ? 'active' : mode === 'sample' ? 'invited' : 'invite_expired'}` }, MODE_TEXT[mode] || mode)) : null,
       key !== 'tracker' && mode === 'not_connected' ? h('ol', { class: 'small steps' }, HOW_TO[key].map((t) => h('li', {}, t))) : null,
       key !== 'tracker' && mode === 'live' && !mapped ? h('p', { class: 'small' }, `No ${label} sources for this client yet. Add them below.`) : null,
-      mode === 'not_connected' ? null : h('p', { class: 'small' }, key === 'tracker' ? 'Last import: ' : 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · syncs automatically every hour' : ''),
+      mode === 'not_connected' ? null : h('p', { class: 'small' }, key === 'tracker' ? 'Last import: ' : 'Last successful sync: ', h('strong', {}, fmtDateTime(s.last_success_at)), key !== 'tracker' && mode === 'live' ? ' · matches ClickUp automatically (every 10 minutes, and whenever a dashboard is opened)' : ''),
       s.last_run && mode !== 'not_connected' ? h('p', { class: 'small muted' }, `Last run ${fmtDateTime(s.last_run.started_at)} · ${s.last_run.status} · seen ${s.last_run.records_seen}, new ${s.last_run.records_new}, updated ${s.last_run.records_updated}`) : null,
       s.recent_failures.length && mode !== 'not_connected' ? h('div', { class: 'error small' }, h('strong', {}, 'Recent failures'), h('ul', {}, s.recent_failures.slice(0, 3).map((f) => h('li', {}, `${fmtDateTime(f.started_at)}: ${f.error}`)))) : null,
       key === 'clickup' && mode === 'live' && mapped ? h('div', { class: 'hint' },
-        'Does this client have a points tracker list in ClickUp (Total Points + Service Point Status)? Load everything in it once:',
+        'Make this client match its ClickUp tracker right now (this also happens automatically):',
         h('div', { class: 'actions' }, h('button', { class: 'secondary', onclick: (e) => {
-          if (!confirm('Read every task in this client\'s ClickUp tracker and add it to the ledger?\n\nCompleted = used, In Progress / Client Review = committed, everything else = planned. Tasks already on the ledger are skipped, so this is safe to run again.')) return;
+          if (!confirm('Re-read this client\'s ClickUp tracker and make the app match it?\n\nCompleted = used, In Progress / Client Review = committed, everything else = planned. Safe to run any time.')) return;
           e.target.disabled = true; e.target.textContent = 'Reading ClickUp…';
           act(async () => {
             const r = await api(`/api/staff/clients/${state.clientId}/clickup-import`, {});
-            toast(`Found ${r.found} tracker items: ${r.created} added, ${r.skipped} already there. Now ${r.balance.used} used, ${r.balance.committed} committed, ${r.balance.available} available.`);
+            toast(`Matched ${r.found} tracker items: ${r.created} added, ${r.updated || 0} updated, ${r.removed || 0} removed. Now ${num(r.balance.used)} used, ${num(r.balance.committed)} committed, ${num(r.balance.available)} available.`);
           });
-        } }, 'Import tracker history from ClickUp'))) : null,
+        } }, 'Match ClickUp tracker now'))) : null,
       key !== 'tracker' && mode !== 'not_connected' ? h('button', { class: 'primary', disabled: !mapped, onclick: () => act(async () => {
         const r = await api(`/api/staff/clients/${state.clientId}/sync`, { source: key });
         if (r[key].status === 'failed') throw new Error(`Sync failed: ${r[key].error}`);
-        toast(`Synced: ${r[key].new} new, ${r[key].updated} updated${r[key].rescheduled ? `, ${r[key].rescheduled} moved to a new month or type` : ''}. Check the Review queue.`);
+        toast(r[key].mirrored ? `Matched to ClickUp: ${r[key].new} added, ${r[key].updated} updated, ${r[key].removed} removed.`
+          : `Synced: ${r[key].new} new, ${r[key].updated} updated.`);
       }) }, `Sync ${label} now`) : null);
   };
   return h('div', {},
-    h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('outlook', 'Outlook'), box('tracker', 'Tracker import')),
+    h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('tracker', 'Tracker import')),
     renderEditorialPageCard(o),
     renderFeedsCard(o),
     renderHubSpotCard(o),
@@ -513,15 +514,15 @@ function renderMappings(o) {
           } }, 'Remove'))))))),
       h('h3', {}, 'Add a source'), form),
     h('section', { class: 'card explain' }, h('h2', {}, 'How the ClickUp connection works'),
-      h('p', { class: 'small' }, o.connector_mode.clickup === 'live' ? 'ClickUp is connected. It syncs every hour, or click "Sync ClickUp now".'
+      h('p', { class: 'small' }, o.connector_mode.clickup === 'live' ? 'ClickUp is connected. The app matches ClickUp every 10 minutes and whenever a dashboard is opened, or click "Sync ClickUp now".'
         : o.connector_mode.clickup === 'sample' ? 'This is the demo: it reads built-in sample data, not your real ClickUp.'
         : 'ClickUp is not connected yet. Follow the three steps in the ClickUp box above.'),
       h('ol', { class: 'small' },
-        h('li', {}, 'Every hour (or when you click "Sync ClickUp now"), the server asks ClickUp for tasks in the lists above that changed since the last sync. It only reads tasks. The one exception is a client answering an item in "Waiting on you" (approve, request changes, mark done): that sets the task\'s status and adds a comment.'),
-        h('li', {}, 'Points-tracker lists (like "2026 Service Point Tracking") are read directly: "Service Point Status" gives the stage (Planned = forecast, In Progress = committed, Completed = used) and "Total Points" gives the amount. Month headings are ignored.'),
-        h('li', {}, 'Other lists: it uses the task status, plus an optional "Service Menu Item" field or a menu:CODE tag. Subtasks without their own points roll up into their parent.'),
-        h('li', {}, 'Emails that contain the task link (app.clickup.com/t/…) or its ID (CU-…) are grouped with that task, so one deliverable becomes one suggestion.'),
-        h('li', {}, 'It turns what it found into suggestions in the Review queue. Nothing changes the balance until a consultant approves.'))));
+        h('li', {}, 'ClickUp is the source of truth. Every 10 minutes, whenever a dashboard is opened, or when you click "Sync ClickUp now", the app re-reads each client\'s tracker and makes itself match: new items are added, changes are applied, and items deleted from the tracker drop off. There is nothing to review or approve here.'),
+        h('li', {}, 'Points trackers (like "2026 Service Point Tracking"): "Service Point Status" gives the stage (Planned = planned, In Progress / Client Review = committed, Completed = used), "Total Points" the amount, and the month heading or Delivery Month the month.'),
+        h('li', {}, 'Hours trackers (like "Call & Training Tracking"): each call\'s Time Estimate is its length; "CONTRACT ALLOCATION" rows set the contracted hours.'),
+        h('li', {}, 'To change anything, change it in ClickUp. Edits made in this app to tracker items are overwritten by the next sync.'),
+        h('li', {}, 'The app only reads ClickUp. The one exception is a client answering an item in "Waiting on you" (approve, request changes, mark done): that sets the task\'s status and adds a comment.'))));
 }
 // ------------------------------------------------------------------ quick links on the client dashboard
 function renderLinksCard(list) {
@@ -658,7 +659,7 @@ async function renderClients() {
         h('td', { class: 'num' }, `${c.allocated} pts`), h('td', {}, c.menu_code || '—'),
         h('td', { class: 'small' }, todo.length ? h('span', { class: 'status invited' }, `To do: ${todo.join(', ')}`) : h('span', { class: 'status active' }, 'Live')),
         h('td', { class: 'row-actions' },
-          h('button', { class: 'secondary', onclick: () => open(c.id, 'review') }, 'Open'),
+          h('button', { class: 'secondary', onclick: () => open(c.id, 'months') }, 'Open'),
           h('button', { onclick: () => editClient(c) }, 'Edit')));
     })))) : h('div', { class: 'empty' }, h('p', {}, 'No clients yet. Add your first one below.'));
 

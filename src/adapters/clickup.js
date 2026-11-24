@@ -57,6 +57,7 @@ function normalizeTask(task) {
       menu_code: customField(task, 'Service Menu Item') || (menuTag ? menuTag.slice(5).toUpperCase() : null),
       points,
       from_tracker: trackerStatus != null || totalField != null,
+      tracker_status: trackerStatus != null && trackerStatus !== '' ? String(trackerStatus) : null,
       point_value: num(customField(task, 'Point Value')),
       how_many: num(customField(task, 'How Many')),
       delivery_month: msToIso(customField(task, '📆 Delivery Month') || customField(task, 'Delivery Month')),

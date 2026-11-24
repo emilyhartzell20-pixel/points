@@ -78,7 +78,7 @@ function renderClientView(v, opts = {}) {
     h('section', { class: 'stats', 'aria-label': `${U.Word} balance` },
       stat('Total allocated', v.balance.allocated, '', allocNote),
       stat('Used', v.balance.used, 'used', 'Completed work'),
-      stat('Committed', v.balance.committed, 'committed', 'Approved, not yet complete'),
+      stat('Committed', v.balance.committed, 'committed', 'In progress, not yet complete'),
       stat('Available', v.balance.available, 'available', 'Allocated − used − committed')),
     showPlanned ? h('p', { class: 'planned-note' }, h('span', { class: 'tip-key seg-planned' }),
       `${num(v.planned.points)} more ${U.word} are planned. If all planned work goes ahead, ${num(v.planned.available_after)} ${U.word} remain.`) : null,
@@ -97,7 +97,7 @@ function renderClientView(v, opts = {}) {
 // Stage colors are one hue, dark → light (used → committed → planned); planned is also striped because it
 // isn't counted. Type colors are the validated categorical palette in fixed alphabetical slots, always
 // shown next to the type's name so color never carries meaning alone.
-const STAGE_LABEL = { used: 'Completed', committed: 'Approved', planned: 'Planned' };
+const STAGE_LABEL = { used: 'Completed', committed: 'In progress', planned: 'Planned' };
 const SVGNS = 'http://www.w3.org/2000/svg';
 function s(tag, attrs, ...kids) {
   const el = document.createElementNS(SVGNS, tag);
@@ -121,7 +121,7 @@ function monthChart(months, { showPlanned = true, onPick } = {}) {
   const y = (v) => top + plotH - (v / yMax) * plotH;
   const width = left + months.length * W + 8;
   const nowKey = new Date().toISOString().slice(0, 7);
-  const svg = s('svg', { viewBox: `0 0 ${width} ${H}`, class: 'month-chart', role: 'img', 'aria-label': `${U.Word} by month: completed, approved and planned` },
+  const svg = s('svg', { viewBox: `0 0 ${width} ${H}`, class: 'month-chart', role: 'img', 'aria-label': `${U.Word} by month: completed, in progress and planned` },
     s('defs', {}, s('pattern', { id: 'planned-hatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
       s('rect', { width: 6, height: 6, class: 'seg-planned-bg' }), s('line', { x1: 0, y1: 0, x2: 0, y2: 6, class: 'seg-planned-line' }))));
   for (let v = 0; v <= yMax; v += step) {
@@ -146,7 +146,7 @@ function monthChart(months, { showPlanned = true, onPick } = {}) {
     const [yy, mm] = m.key.split('-');
     const short = new Date(Date.UTC(+yy, +mm - 1, 15)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
     svg.append(s('text', { x: x + bw / 2, y: H - 10, class: `axis-label${m.key === nowKey ? ' now' : ''}`, 'text-anchor': 'middle' }, i === 0 || mm === '01' ? `${short} ’${yy.slice(2)}` : short));
-    const hit = s('rect', { x: left + i * W, y: top, width: W, height: plotH + 4, class: 'hit', tabindex: '0', 'aria-label': `${m.label}: ${m.used} completed, ${m.committed} approved${showPlanned ? `, ${m.planned} planned` : ''}` });
+    const hit = s('rect', { x: left + i * W, y: top, width: W, height: plotH + 4, class: 'hit', tabindex: '0', 'aria-label': `${m.label}: ${m.used} completed, ${m.committed} in progress${showPlanned ? `, ${m.planned} planned` : ''}` });
     const show = () => {
       tip.replaceChildren(h('strong', {}, m.label),
         ...['used', 'committed', ...(showPlanned ? ['planned'] : [])].map((k) => h('div', { class: 'tip-row' }, h('span', { class: `tip-key seg-${k}` }), `${STAGE_LABEL[k]}`, h('span', { class: 'tip-val' }, `${num(m[k])} ${U.abbr}`))));
@@ -182,7 +182,7 @@ function monthList(data, { renderItem, showPlanned = true, forClient = false }) 
     const totalShown = m.used + m.committed + (showPlanned ? m.planned : 0);
     if (forClient && !totalShown) continue;
     const near = Math.abs((+m.key.slice(0, 4) * 12 + +m.key.slice(5)) - (+nowKey.slice(0, 4) * 12 + +nowKey.slice(5))) <= 1;
-    const parts = [m.used && `${num(m.used)} completed`, m.committed && `${num(m.committed)} approved`, showPlanned && m.planned && `${num(m.planned)} planned`].filter(Boolean);
+    const parts = [m.used && `${num(m.used)} completed`, m.committed && `${num(m.committed)} in progress`, showPlanned && m.planned && `${num(m.planned)} planned`].filter(Boolean);
     sections.push(h('details', { class: `month${m.key === nowKey ? ' current' : ''}`, id: `month-${m.key}`, open: near ? true : null },
       h('summary', {}, h('span', { class: 'month-name' }, m.label, m.key === nowKey ? h('span', { class: 'now-pill' }, 'This month') : null),
         h('span', { class: 'month-total' }, totalShown ? `${num(totalShown)} ${U.abbr}` : 'No work yet'), h('span', { class: 'month-parts muted small' }, parts.join(' · '))),
@@ -190,7 +190,7 @@ function monthList(data, { renderItem, showPlanned = true, forClient = false }) 
         m.items.map((it) => h('li', { class: `month-item stage-${it.stage}`, 'data-type': it.type },
           typeChip(typeBySlot[it.type] || { name: it.type, slot: 9 }),
           h('div', { class: 'month-item-main' }, renderItem(it)),
-          h('span', { class: `stage-pill ${it.stage}` }, STAGE_LABEL[it.stage]),
+          h('span', { class: `stage-pill ${it.stage}${it.phase === 'Ready for your review' ? ' phase-review' : it.phase === 'On hold' ? ' phase-hold' : ''}` }, it.phase || STAGE_LABEL[it.stage]),
           h('span', { class: 'month-item-pts' }, `${num(it.points)} ${U.abbr}`))),
         m.other_points ? h('li', { class: 'month-item other' }, h('span', { class: 'muted small' }, `${num(m.other_points)} more ${U.word} of work (descriptions being finalized)`)) : null)
         : h('p', { class: 'muted small empty-month' }, 'Nothing scheduled.')));
@@ -212,15 +212,15 @@ function renderOutlook(o, { showPlanned = true, forClient = false } = {}) {
     h('div', { class: 'toolbar' }, h('h2', {}, 'Looking ', h('em', {}, 'ahead')),
       h('span', { class: 'muted small' }, `Contract runs through ${endLabel} · ${o.months_left} month${o.months_left === 1 ? '' : 's'} left`)),
     h('p', { class: `outlook-summary${over ? ' neg' : ''}` }, over
-      ? `⚠ If everything ${showPlanned ? 'planned' : 'approved'} goes ahead, the allocation runs out: ${num(Math.abs(o.remaining_at_end))} ${U.word} over by ${endLabel}.`
+      ? `⚠ If everything ${showPlanned ? 'planned' : 'in progress'} goes ahead, the allocation runs out: ${num(Math.abs(o.remaining_at_end))} ${U.word} over by ${endLabel}.`
       : showPlanned
         ? `${num(o.available_now)} ${U.word} available today. If everything planned goes ahead, ${num(o.remaining_at_end)} ${U.word} remain at the end of the contract (${endLabel}).`
         : `${num(o.available_now)} ${U.word} available today, through the end of the contract (${endLabel}).`),
     h('div', { class: 'table-wrap' }, h('table', { class: 'outlook-table' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'Month'), h('th', { class: 'num' }, 'Approved'), showPlanned ? h('th', { class: 'num' }, 'Planned') : null,
+      h('thead', {}, h('tr', {}, h('th', {}, 'Month'), h('th', { class: 'num' }, 'In progress'), showPlanned ? h('th', { class: 'num' }, 'Planned') : null,
         h('th', { class: 'num' }, forClient ? `${U.Word} left after` : 'Remaining after'))),
       h('tbody', {}, rows))),
-    h('p', { class: 'muted small' }, `Approved ${U.word} are already reserved, so they’re included in today’s available number. Planned ${U.word} come off as each month goes ahead.`));
+    h('p', { class: 'muted small' }, `Work in progress is already counted, so it’s included in today’s available number. Planned ${U.word} come off as each month goes ahead.`));
 }
 
 // ------------------------------------------------------------------ client content: waiting on you + editorial calendar

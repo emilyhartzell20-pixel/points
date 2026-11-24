@@ -358,3 +358,6 @@ button.type-chip { cursor: pointer; }
 .presets button { padding: 4px 10px; font-size: 13px; }
 .client-view .section-title { margin: 8px 0 10px; font-size: 22px; }
 .client-view .section-title em { font-family: 'Lora', Georgia, serif; font-style: italic; font-weight: 500; color: var(--accent); }
+.stage-pill.phase-review { background: #fdebd9; color: #9a4a12; border-color: #f2c49c; }
+.stage-pill.phase-hold { background: #eceef2; color: #4a5568; border-color: #d3d7de; }
+@media (prefers-color-scheme: dark) { .stage-pill.phase-review { background: rgba(225,114,38,.2); color: #f6b98a; } .stage-pill.phase-hold { background: rgba(255,255,255,.08); color: #c9d1dd; } }
