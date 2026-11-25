@@ -14,6 +14,7 @@ const admin = require('./admin');
 const { HubSpotSync } = require('./adapters/hubspot');
 const editorialPages = require('./pages');
 const links = require('./links');
+const reports = require('./reports');
 const hubspotSync = require('./hubspotSync');
 const feeds = require('./feeds');
 const { clientDashboard } = require('./clientView');
@@ -133,6 +134,7 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
       job = Promise.all([
         hasTracker ? ingest.importTrackerFromClickUp(db, { clientId, adapter: a, allowEmpty: true }) : null,
         feeds.refreshFeeds(db, a, { clientId }),
+        reports.refreshReports(db, a, { clientId }),
       ]).catch((e) => console.error(`Refresh from ClickUp failed for client ${clientId}: ${e.message}`))
         .finally(() => { reading.delete(clientId); lastRead.set(clientId, Date.now()); });
       reading.set(clientId, job);
@@ -186,6 +188,7 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
       hubspot: { configured: hubspot.configured },
       editorial_page: editorialPages.pageInfo(db, id),
       links: links.listLinks(db, id),
+      report: reports.getReport(db, id),
       feeds: feeds.listFeeds(db, id).map((f) => ({ ...f, items: db.prepare('SELECT COUNT(*) n FROM feed_items WHERE feed_id = ?').get(f.id).n })),
     });
   });
@@ -384,6 +387,21 @@ function createApp({ db, adapters = null, secureCookies = process.env.NODE_ENV =
   route('POST', '/api/staff/clients/:id/editorial/remove', 'staff', async ({ res, p, user }) => {
     editorialPages.removePage(db, { clientId: clientExists(int(p.id)), actor: user.email }); send(res, 200, { ok: true });
   });
+  route('POST', '/api/staff/clients/:id/report', 'staff', async ({ req, res, p, user }) => {
+    const id = clientExists(int(p.id)); const b = await readJson(req);
+    reports.setReport(db, { clientId: id, url: b.url, actor: user.email });
+    await reports.refreshReports(db, adapters.clickup, { clientId: id });
+    send(res, 200, reports.getReport(db, id));
+  });
+  route('POST', '/api/staff/clients/:id/report/refresh', 'staff', async ({ res, p }) => {
+    const id = clientExists(int(p.id));
+    if (!adapters.clickup || adapters.clickup.mode !== 'live') throw new AppError(409, 'ClickUp is not connected');
+    await reports.refreshReports(db, adapters.clickup, { clientId: id });
+    send(res, 200, reports.getReport(db, id));
+  });
+  route('POST', '/api/staff/clients/:id/report/remove', 'staff', async ({ res, p, user }) => {
+    reports.removeReport(db, { clientId: clientExists(int(p.id)), actor: user.email }); send(res, 200, { ok: true });
+  });
   route('POST', '/api/staff/clients/:id/links', 'staff', async ({ req, res, p, user }) => {
     const id = clientExists(int(p.id)); const b = await readJson(req);
     send(res, 200, links.addLink(db, { clientId: id, label: b.label, url: b.url, note: b.note, actor: user.email }));
@@ -494,6 +512,9 @@ if (require.main === module) {
   const adapters = defaultAdapters({ demo });
   require('./scheduler').scheduleSourceSync(db, adapters);
   feeds.scheduleFeedRefresh(db, adapters.clickup);
+  if (adapters.clickup && adapters.clickup.mode === 'live') {
+    setInterval(() => reports.refreshReports(db, adapters.clickup).catch((e) => console.error(`Recap refresh failed: ${e.message}`)), 60 * 60e3).unref();
+  }
   const port = Number(process.env.PORT || 3000);
   http.createServer(createApp({ db, hubspot, adapters, demo })).listen(port, () => console.log(`LeadG2 points tracker listening on port ${port}`));
 }

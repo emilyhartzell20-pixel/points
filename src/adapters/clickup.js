@@ -117,6 +117,13 @@ class LiveClickUp {
     await writeJson(`${API}/task/${id}`, headers, { method: 'PUT', body: { status }, fetchImpl: this.fetchImpl });
     await writeJson(`${API}/task/${id}/comment`, headers, { method: 'POST', body: { comment_text: comment, notify_all: true }, fetchImpl: this.fetchImpl });
   }
+  /** Every page of a ClickUp doc, with its text as Markdown (read-only; ClickUp's v3 Docs API). */
+  async docPages(workspaceId, docId) {
+    if (!this.token) throw new Error('ClickUp is not configured (CLICKUP_API_TOKEN missing on the server)');
+    const url = `https://api.clickup.com/api/v3/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/pages?max_page_depth=-1&content_format=text%2Fmd`;
+    const r = await getJson(url, { Authorization: this.token, Accept: 'application/json' }, { fetchImpl: this.fetchImpl });
+    return Array.isArray(r) ? r : r.pages || [];
+  }
   async fetchTaskById(id) {
     return this.get(`/task/${encodeURIComponent(id)}`);
   }

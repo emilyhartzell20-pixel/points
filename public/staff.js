@@ -382,6 +382,7 @@ function renderSources() {
   };
   return h('div', {},
     h('div', { class: 'three-col' }, box('clickup', 'ClickUp'), box('tracker', 'Tracker import')),
+    renderReportCard(o),
     renderEditorialPageCard(o),
     renderFeedsCard(o),
     renderHubSpotCard(o),
@@ -390,6 +391,22 @@ function renderSources() {
       h('p', { class: 'small' }, `Opening balance as of ${fmtDate(o.contract.opening_balance_date)}: ${o.contract.opening_used} used / ${o.contract.opening_committed} committed · ${o.contract.opening_reconciled_at ? `reconciled ${fmtDateTime(o.contract.opening_reconciled_at)}` : 'NOT reconciled'}`),
       h('ul', {}, o.allocations.map((a) => h('li', {}, `${a.kind}: ${num(a.points)} ${U.abbr} — ${a.source_ref} (verified by ${a.verified_by})`)))),
     renderMappings(o));
+}
+
+function renderReportCard(o) {
+  const r = o.report;
+  const url = h('input', { type: 'url', placeholder: 'https://doc.clickup.com/…/d/h/…', 'aria-label': 'ClickUp doc link' });
+  return h('section', { class: 'card' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Monthly results (KPI recaps)'),
+      r && o.connector_mode.clickup === 'live' ? h('button', { onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/report/refresh`, {}), 'Recaps refreshed') }, 'Refresh now') : null),
+    h('p', { class: 'muted small' }, 'Link the ClickUp doc where you write this client\'s monthly KPI recaps (one page per month). The client sees "Your results" on their dashboard: the headline numbers from the newest recap and every month\'s write-up, next to the work completed that month. It refreshes hourly and whenever a dashboard is opened. Everything in the doc is shown to the client, so keep internal notes elsewhere.'),
+    r ? h('div', { class: 'row' },
+      h('p', { class: 'small' }, 'Linked: ', h('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, 'ClickUp doc'),
+        r.last_error ? h('span', { class: 'error' }, ` · ${r.last_error}`) : ` · ${r.pages ?? 0} monthly page(s) · updated ${fmtDateTime(r.refreshed_at)}`),
+      h('div', { class: 'row-actions' }, h('button', { class: 'danger', onclick: () => { if (confirm('Stop showing these recaps to the client?')) act(() => api(`/api/staff/clients/${state.clientId}/report/remove`, {}), 'Removed'); } }, 'Remove')))
+      : h('p', { class: 'muted small' }, 'No recap doc linked yet.'),
+    h('div', { class: 'row' }, h('label', {}, r ? 'Use a different doc' : 'ClickUp doc link', url),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => act(() => api(`/api/staff/clients/${state.clientId}/report`, { url: url.value }), 'Recap doc linked') }, r ? 'Replace' : 'Link doc'))));
 }
 
 function renderEditorialPageCard(o) {

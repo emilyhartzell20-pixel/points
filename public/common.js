@@ -74,6 +74,7 @@ function renderClientView(v, opts = {}) {
       h('p', { class: 'muted small' }, `Contract term ${fmtDate(v.contract_term.start)} – ${fmtDate(v.contract_term.end)} · Last updated ${fmtDateTime(v.last_updated)}`)),
     renderLinks(v.links),
     renderWaiting(v.content, opts),
+    renderResults(v.results),
     h('h2', { class: 'section-title' }, 'Your service ', h('em', {}, U.word)),
     h('section', { class: 'stats', 'aria-label': `${U.Word} balance` },
       stat('Total allocated', v.balance.allocated, '', allocNote),
@@ -289,6 +290,59 @@ function renderLinks(list) {
         h('span', { class: 'ql-note' }, l.note || `Opens in ${LINK_KIND[l.kind] || 'a new tab'}`)),
       h('span', { class: 'ql-arrow', 'aria-hidden': 'true' }, '↗'))));
 }
+// ------------------------------------------------------------------ monthly results (KPI recaps)
+function spansEl(spans) {
+  return (spans || []).map((sp) => {
+    if (sp.href) return h('a', { href: sp.href, target: '_blank', rel: 'noopener noreferrer' }, sp.t);
+    if (sp.b) return h('strong', {}, sp.t);
+    if (sp.i) return h('em', {}, sp.t);
+    return sp.t;
+  });
+}
+function blocksEl(blocks) {
+  return (blocks || []).map((b) => {
+    if (b.type === 'h3' || b.type === 'h4') return h(b.type, {}, spansEl(b.spans));
+    if (b.type === 'p') return h('p', {}, spansEl(b.spans));
+    if (b.type === 'ul' || b.type === 'ol') return h(b.type, {}, b.items.map((it) => h('li', {}, spansEl(it))));
+    if (b.type === 'table') {
+      return h('div', { class: 'table-wrap' }, h('table', { class: 'recap-table' },
+        h('thead', {}, h('tr', {}, b.head.map((c) => h('th', {}, spansEl(c))))),
+        h('tbody', {}, b.rows.map((r) => h('tr', {}, r.map((c) => h('td', {}, spansEl(c))))))));
+    }
+    return null;
+  });
+}
+const monthName = (key) => new Date(`${key}-15T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+function renderResults(r) {
+  if (!r || !r.months || !r.months.length) return null;
+  const latest = r.months[0];
+  const body = h('div', { class: 'recap-body' });
+  const picker = h('div', { class: 'recap-picker', role: 'tablist', 'aria-label': 'Choose a month' });
+  const show = (m) => {
+    for (const b of picker.children) b.setAttribute('aria-selected', String(b.dataset.month === m.month));
+    body.replaceChildren(
+      h('div', { class: 'recap-head' }, h('h3', {}, m.title),
+        m.work_completed ? h('span', { class: 'recap-effort' }, `${num(m.work_completed)} ${U.word} of work completed in ${monthName(m.month).split(' ')[0]}`) : null),
+      ...blocksEl(m.blocks));
+  };
+  for (const m of r.months) {
+    picker.append(h('button', { type: 'button', role: 'tab', 'data-month': m.month, onclick: () => show(m) }, monthName(m.month)));
+  }
+  show(latest);
+  const hl = r.headline;
+  const details = h('details', { class: 'recap' }, h('summary', {}, `Read the full recap (${r.months.length} month${r.months.length === 1 ? '' : 's'})`), picker, body);
+  return h('section', { class: 'card results' },
+    h('div', { class: 'toolbar' }, h('h2', {}, 'Your ', h('em', {}, 'results')),
+      h('span', { class: 'muted small' }, `Latest: ${monthName(latest.month)}`)),
+    hl ? h('div', { class: 'kpi-tiles' }, hl.items.map((k) => h('div', { class: 'kpi' },
+      h('div', { class: 'kpi-label' }, k.label),
+      h('div', { class: 'kpi-value' }, k.value),
+      k.trend ? h('div', { class: `kpi-trend${/^[+↑]|high|best/i.test(k.trend) ? ' up' : /^[-−↓]/.test(k.trend) ? ' down' : ''}` }, k.trend)
+        : k.compare && k.compare.value ? h('div', { class: 'kpi-trend muted' }, `${k.compare.label}: ${k.compare.value}`) : null))) : null,
+    latest.work_completed ? h('p', { class: 'muted small' }, `Alongside ${num(latest.work_completed)} ${U.word} of work completed in ${monthName(latest.month)}.`) : null,
+    details);
+}
+
 function renderEditorialPage(pg, { preview = false, clientId } = {}) {
   const src = pg.kind === 'url' ? pg.url : preview ? `/api/staff/clients/${clientId}/editorial` : '/api/client/editorial';
   return h('section', { class: 'card editorial-page' },

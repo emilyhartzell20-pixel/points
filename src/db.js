@@ -297,6 +297,10 @@ function migrate(db) {
     file_name TEXT, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)`);
   db.exec(`CREATE TABLE IF NOT EXISTS hours_trackers (list_id TEXT PRIMARY KEY, client_id INTEGER NOT NULL REFERENCES clients(id),
     label TEXT, imported_at TEXT, last_error TEXT)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS client_reports (client_id INTEGER PRIMARY KEY REFERENCES clients(id), workspace_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL UNIQUE, url TEXT, added_by TEXT, refreshed_at TEXT, last_error TEXT, pages INTEGER)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS report_pages (client_id INTEGER NOT NULL REFERENCES clients(id), page_id TEXT NOT NULL,
+    title TEXT NOT NULL, month TEXT NOT NULL, blocks TEXT NOT NULL, page_updated TEXT, PRIMARY KEY (client_id, page_id))`);
   if (!has('work_items', 'phase')) db.exec('ALTER TABLE work_items ADD COLUMN phase TEXT');
   if (!has('clients', 'unit')) db.exec("ALTER TABLE clients ADD COLUMN unit TEXT NOT NULL DEFAULT 'points'");
   if (!has('invites', 'replaced_at')) db.exec('ALTER TABLE invites ADD COLUMN replaced_at TEXT');
