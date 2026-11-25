@@ -202,3 +202,33 @@ test('ClickUp links: list, folder and space URLs', () => {
   assert.deepEqual(feeds.parseTarget('901710435611'), { scope: 'list', id: '901710435611' });
   assert.equal(feeds.parseTarget('https://app.clickup.com/9017740562/v/f/90175845823/8cqzk8j-62977').scope, 'folder');
 });
+
+test('EmployerFlexible\'s Collaboration list: "ready" items assigned to client people (guests, no login yet) show up', async () => {
+  const { db, clientId } = setup();
+  const efStatuses = [['not ready', 'open'], ['ready', 'unstarted'], ['revision needed', 'done'], ['under revision', 'done'], ['approved', 'closed']]
+    .map(([status, type]) => ({ status, type }));
+  const client = [{ username: 'Alice McDonald', email: 'alice@employerflexible.example' }, { username: 'Dan', email: 'dan@employerflexible.example' }];
+  const staff = [{ username: 'Jeremy Streich', email: 'jeremy@leadg2.com' }];
+  const st = (status) => ({ status, type: efStatuses.find((x) => x.status === status).type });
+  const space = [
+    { id: 'p', name: 'Review Champion Playbook #3', status: st('ready'), assignees: client, list: { id: '804' }, due_date: ms('2026-12-01') },
+    { id: 's', name: 'December Social Media', status: st('ready'), assignees: client, list: { id: '804' }, due_date: ms('2026-12-04') },
+    { id: 'f', name: 'Submit Monthly Comms Intake Form', status: st('ready'), assignees: client, list: { id: '804' }, due_date: ms('2026-12-05') },
+    { id: 'n', name: 'January Blogs', status: st('not ready'), assignees: client, list: { id: '804' } },
+    { id: 'r', name: 'November Blogs', status: st('revision needed'), assignees: client, list: { id: '804' } },
+    { id: 'x', name: 'Write Copy', status: { status: 'not ready', type: 'open' }, assignees: staff, list: { id: '717' } },
+    { id: 'y', name: 'Research + create first draft', status: { status: 'ready to start', type: 'unstarted' }, assignees: staff, list: { id: '857' } },
+  ];
+  const sent = [];
+  const a = { mode: 'live', fetchTasks: async () => space, listStatuses: async () => efStatuses, respondToReview: async (id, ans) => { sent.push({ id, ...ans }); } };
+  feeds.addFeed(db, { clientId, kind: 'collaboration', listId: 'space:90176032931', actor: 't' });
+  await feeds.refreshFeeds(db, a, { clientId });
+  const w = clientDashboard(db, clientId).content.waiting;
+  assert.deepEqual(w.map((i) => [i.title, i.action]), [
+    ['Review Champion Playbook #3', 'review'], ['December Social Media', 'review'], ['Submit Monthly Comms Intake Form', 'assigned']]);
+  assert.doesNotMatch(JSON.stringify(w), /alice@|Jeremy/);
+  await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'p', decision: 'approve' });
+  await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 's', decision: 'changes', comment: 'Swap post 3' });
+  await feeds.respondToReview(db, a, { clientId, user: dana, taskId: 'f', decision: 'done' });
+  assert.deepEqual(sent.map((x) => [x.id, x.status]), [['p', 'approved'], ['s', 'revision needed'], ['f', 'approved']]);
+});
